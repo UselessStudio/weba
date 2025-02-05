@@ -9,6 +9,7 @@ import buildClassName from '../../util/buildClassName';
 import useOldLang from '../../hooks/useOldLang';
 
 type OwnProps = {
+  children?: React.ReactNode;
   ref?: RefObject<HTMLInputElement>;
   id?: string;
   className?: string;
@@ -33,6 +34,7 @@ type OwnProps = {
 };
 
 const InputText: FC<OwnProps> = ({
+  children,
   ref,
   id,
   className,
@@ -95,6 +97,7 @@ const InputText: FC<OwnProps> = ({
       {labelText && (
         <label htmlFor={id}>{labelText}</label>
       )}
+      {children}
     </div>
   );
 };

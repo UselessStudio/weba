@@ -302,7 +302,10 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
             value={state.folder.title.text}
             onChange={handleChange}
             error={state.error && state.error === ERROR_NO_TITLE ? ERROR_NO_TITLE : undefined}
-          />
+          >
+            <p>SOS</p>
+            {/*  TODO: emoji selector */}
+          </InputText>
         </div>
 
         {!isOnlyInvites && (

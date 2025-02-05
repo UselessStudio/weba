@@ -22,7 +22,7 @@
     white-space: nowrap;
   }
 
-  .SearchInput {
+  .SearchInput:not(.full-width){
     margin-left: 0.625rem;
     max-width: calc(100% - 3.25rem);
 

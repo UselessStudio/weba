@@ -329,19 +329,19 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
       ref={ref}
       className={buildClassName(
         'ChatFolders',
-        shouldRenderFolders && shouldHideFolderTabs && 'ChatFolders--tabs-hidden',
+        shouldRenderFolders && isForumPanelOpen && 'ChatFolders--tabs-hidden',
         shouldRenderStoryRibbon && 'with-story-ribbon',
       )}
     >
       {shouldRenderStoryRibbon && <StoryRibbon isClosing={isStoryRibbonClosing} />}
-      {shouldRenderFolders ? (
+      {shouldRenderFolders && !shouldHideFolderTabs ? (
         <TabList
           contextRootElementSelector="#LeftColumn"
           tabs={folderTabs}
           activeTab={activeChatFolder}
           onSwitchTab={handleSwitchTab}
         />
-      ) : shouldRenderPlaceholder ? (
+      ) : isForumPanelOpen && shouldRenderPlaceholder ? (
         <div ref={placeholderRef} className="tabs-placeholder" />
       ) : undefined}
       <Transition
