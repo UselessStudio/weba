@@ -218,6 +218,19 @@ export const CHAT_STICKER_SET_ID = 'chatStickers';
 export const DEFAULT_TOPIC_ICON_STICKER_ID = 'topic-default-icon';
 export const DEFAULT_STATUS_ICON_ID = 'status-default-icon';
 export const EMOJI_IMG_REGEX = /<img[^>]+alt="([^"]+)"(?![^>]*data-document-id)[^>]*>/gm;
+export const FOLDER_EMOTICONS = {
+  chats: '💬',
+  chat: '✅',
+  user: '👤',
+  group: '👥',
+  star: '⭐',
+  channel: '📢',
+  bot: '🤖',
+  folder: '📁',
+};
+export const FOLDER_ICONS: (keyof typeof FOLDER_EMOTICONS)[] = [
+  'chats', 'chat', 'user', 'group', 'star', 'channel', 'bot', 'folder',
+] as const;
 
 export const BASE_EMOJI_KEYWORD_LANG = 'en';
 

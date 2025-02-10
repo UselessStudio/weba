@@ -166,10 +166,11 @@ const LeftMain: FC<OwnProps> = ({
 
   const lang = useOldLang();
   const { isMobile } = useAppLayout();
+  const [shouldRenderFolders, setShouldRenderFolders] = useState(false);
 
   return (
     <div id="LeftColumn-container">
-      {!isMobile && (
+      {!isMobile && shouldRenderFolders && (
         <SideChatFolders
           onSelectSettings={handleSelectSettings}
           onSelectContacts={handleSelectContacts}
@@ -194,7 +195,7 @@ const LeftMain: FC<OwnProps> = ({
           onReset={onReset}
           shouldSkipTransition={shouldSkipTransition}
           isClosingSearch={isClosingSearch}
-          isMenuHidden={!isMobile}
+          isMenuHidden={!isMobile && shouldRenderFolders}
         />
         <Transition
           name={shouldSkipTransition ? 'none' : 'zoomFade'}
@@ -210,6 +211,7 @@ const LeftMain: FC<OwnProps> = ({
               case LeftColumnContent.ChatList:
                 return (
                   <ChatFolders
+                    setShouldRenderFolders={setShouldRenderFolders}
                     shouldHideFolderTabs={!isMobile}
                     onSettingsScreenSelect={onSettingsScreenSelect}
                     onLeftColumnContentChange={onContentChange}

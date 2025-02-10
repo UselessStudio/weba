@@ -9,6 +9,10 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
     background-color: var(--color-chat-folders-background);
   }
 
+  .folder-list {
+    overflow-y: auto;
+  }
+
   .chat-folder {
     & {
       font-size: 0.7rem;
@@ -21,7 +25,7 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
     }
 
     .badge {
-      background-color: var(--color-primary);
+      background-color: var(--color-text-secondary);
       color: var(--color-white);
       min-width: 1.1rem;
       height: 1.1rem;
@@ -36,15 +40,24 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
       right: 1.3rem;
       line-height: 1.2rem;
     }
+    .active {
+      background-color: var(--color-primary);
+    }
 
     .emoji-small {
       width: 1rem;
       height: 1rem;
     }
 
-    .icon {
+    .icons-chat-folder {
+      --custom-emoji-size: 2.5rem;
       font-size: 2.5rem;
     }
+
+    .emoji:not(.emoji-small):not(.custom-emoji) {
+      height: 2.25rem;
+    }
+
     &__active {
       color: var(--color-primary);
     }

@@ -4,15 +4,16 @@ import React, {
 } from '../../../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../../../global';
 
-import type { ApiChatlistExportedInvite } from '../../../../api/types';
+import type { ApiChatlistExportedInvite, ApiSticker } from '../../../../api/types';
 import type {
   FolderEditDispatch,
   FoldersState,
 } from '../../../../hooks/reducers/useFoldersReducer';
+import { ApiMessageEntityTypes } from '../../../../api/types';
 
 import { STICKER_SIZE_FOLDER_SETTINGS } from '../../../../config';
 import { isUserId } from '../../../../global/helpers';
-import { selectCanShareFolder } from '../../../../global/selectors';
+import { selectCanShareFolder, selectIsCurrentUserPremium } from '../../../../global/selectors';
 import { selectCurrentLimit } from '../../../../global/selectors/limits';
 import { findIntersectionWithSet } from '../../../../util/iteratees';
 import { MEMO_EMPTY_ARRAY } from '../../../../util/memo';
@@ -31,6 +32,7 @@ import FloatingActionButton from '../../../ui/FloatingActionButton';
 import InputText from '../../../ui/InputText';
 import ListItem from '../../../ui/ListItem';
 import Spinner from '../../../ui/Spinner';
+import FolderIconButton from './FolderIconButton';
 
 type OwnProps = {
   state: FoldersState;
@@ -54,6 +56,7 @@ type StateProps = {
   maxInviteLinks: number;
   maxChatLists: number;
   chatListCount: number;
+  isCurrentUserPremium: boolean;
 };
 
 const SUBMIT_TIMEOUT = 500;
@@ -82,6 +85,7 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
   maxChatLists,
   chatListCount,
   onSaveFolder,
+  isCurrentUserPremium,
 }) => {
   const {
     loadChatlistInvites,
@@ -153,7 +157,7 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
 
   const handleChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const { currentTarget } = event;
-    dispatch({ type: 'setTitle', payload: currentTarget.value.trim() });
+    dispatch({ type: 'setTitle', payload: { text: currentTarget.value.trim() } });
   }, [dispatch]);
 
   const handleSubmit = useCallback(() => {
@@ -279,6 +283,53 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
     );
   }
 
+  const handleIconFolder = useCallback((icon: string) => {
+    dispatch({ type: 'setIcon', payload: icon });
+  }, [dispatch]);
+
+  const addEmoji = useCallback((title: string, emoji: string) => {
+    const emojiRegex = /(?=\p{Emoji})(?!\p{Number})/u;
+    const split = title.split(' ');
+    let offset = 0;
+    if (split.length === 0) {
+      split.push(emoji);
+    } else if (emojiRegex.test(split[0])) {
+      split[0] = emoji;
+    } else if (emojiRegex.test(split[split.length - 1])) {
+      split[split.length - 1] = emoji;
+      offset = title.length - emoji.length;
+    } else {
+      split.push(emoji);
+      offset = title.length + 1;
+    }
+    return { text: split.join(' ').trim(), offset };
+  }, []);
+
+  const handleIconEmoji = useCallback((icon: string) => {
+    dispatch({ type: 'setIcon', payload: undefined });
+    dispatch({ type: 'setTitle', payload: { text: addEmoji(state.folder.title.text, icon).text } });
+  }, [dispatch, addEmoji, state.folder.title.text]);
+
+  const handleIconSticker = useCallback((sticker: ApiSticker) => {
+    if (!sticker.emoji || !sticker.isCustomEmoji || !isCurrentUserPremium) return;
+    const { text, offset } = addEmoji(state.folder.title.text, sticker.emoji);
+    dispatch({ type: 'setIcon', payload: undefined });
+    dispatch({
+      type: 'setTitle',
+      payload: {
+        text,
+        entities: [
+          {
+            type: ApiMessageEntityTypes.CustomEmoji,
+            offset,
+            length: sticker.emoji.length,
+            documentId: sticker.id,
+          },
+        ],
+      },
+    });
+  }, [isCurrentUserPremium, addEmoji, dispatch, state.folder.title.text]);
+
   return (
     <div className="settings-fab-wrapper">
       <div className="settings-content no-border custom-scroll">
@@ -296,16 +347,24 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
             </p>
           )}
 
-          <InputText
-            className="mb-0"
-            label={lang('FilterNameHint')}
-            value={state.folder.title.text}
-            onChange={handleChange}
-            error={state.error && state.error === ERROR_NO_TITLE ? ERROR_NO_TITLE : undefined}
-          >
-            <p>SOS</p>
-            {/*  TODO: emoji selector */}
-          </InputText>
+          <div className="emoji-picker">
+            <InputText
+              className="mb-0"
+              label={lang('FilterNameHint')}
+              value={state.folder.title.text}
+              onChange={handleChange}
+              error={state.error && state.error === ERROR_NO_TITLE ? ERROR_NO_TITLE : undefined}
+            />
+            <div className="emoji-picker-button">
+              <FolderIconButton
+                title={state.folder.title}
+                emoticon={state.folder.emoticon}
+                setIconFolder={handleIconFolder}
+                setIconEmoji={handleIconEmoji}
+                setIconSticker={handleIconSticker}
+              />
+            </div>
+          </div>
         </div>
 
         {!isOnlyInvites && (
@@ -410,6 +469,7 @@ export default memo(withGlobal<OwnProps>(
       isRemoved: state.folderId !== undefined && !byId[state.folderId],
       maxInviteLinks: selectCurrentLimit(global, 'chatlistInvites'),
       maxChatLists: selectCurrentLimit(global, 'chatlistJoined'),
+      isCurrentUserPremium: selectIsCurrentUserPremium(global),
       chatListCount,
     };
   },

@@ -109,15 +109,15 @@ export type FoldersState = {
   error?: string;
   folderId?: number;
   chatFilter: string;
-  folder: Omit<ApiChatFolder, 'id' | 'description' | 'emoticon'>;
+  folder: Omit<ApiChatFolder, 'id' | 'description'>;
   includeFilters?: FolderIncludeFilters;
   excludeFilters?: FolderExcludeFilters;
 };
 export type FoldersActions = (
   'setTitle' | 'saveFilters' | 'editFolder' | 'reset' | 'setChatFilter' | 'setIsLoading' | 'setError' |
   'editIncludeFilters' | 'editExcludeFilters' | 'setIncludeFilters' | 'setExcludeFilters' | 'setIsTouched' |
-  'setFolderId' | 'setIsChatlist'
-  );
+  'setFolderId' | 'setIsChatlist' | 'setEmoji' | 'setIcon'
+);
 export type FolderEditDispatch = Dispatch<FoldersState, FoldersActions>;
 
 const INITIAL_STATE: FoldersState = {
@@ -135,12 +135,21 @@ const foldersReducer: StateReducer<FoldersState, FoldersActions> = (
   action,
 ): FoldersState => {
   switch (action.type) {
+    case 'setIcon':
+      return {
+        ...state,
+        folder: {
+          ...state.folder,
+          emoticon: action.payload,
+        },
+        isTouched: true,
+      };
     case 'setTitle':
       return {
         ...state,
         folder: {
           ...state.folder,
-          title: { text: action.payload },
+          title: action.payload,
         },
         isTouched: true,
       };

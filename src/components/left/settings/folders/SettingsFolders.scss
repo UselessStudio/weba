@@ -6,6 +6,19 @@
   gap: 1rem;
 }
 
+.emoji-picker {
+  & {
+    width: 100%;
+    position: relative;
+  }
+
+  &-button {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+}
 .settings-folders-blocked-icon {
   color: var(--color-text-secondary);
   margin-left: 0.25rem;

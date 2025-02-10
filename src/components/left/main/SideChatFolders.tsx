@@ -1,12 +1,13 @@
 import type { FC } from '../../../lib/teact/teact';
 import React, { memo, useMemo } from '../../../lib/teact/teact';
-import { getActions, withGlobal } from '../../../global';
+import { getActions, getGlobal, withGlobal } from '../../../global';
 
 import type { ApiChatFolder, ApiChatlistExportedInvite, ApiSession } from '../../../api/types';
 import type { GlobalState } from '../../../global/types';
 
 import { ALL_FOLDER_ID } from '../../../config';
-import { selectTabState } from '../../../global/selectors';
+import { selectCanShareFolder, selectTabState } from '../../../global/selectors';
+import { selectCurrentLimit } from '../../../global/selectors/limits';
 import buildClassName from '../../../util/buildClassName';
 import { MEMO_EMPTY_ARRAY } from '../../../util/memo';
 import { renderTextWithEntities } from '../../common/helpers/renderTextWithEntities';
@@ -18,7 +19,7 @@ import useLastCallback from '../../../hooks/useLastCallback';
 
 import Icon from '../../common/icons/Icon';
 import Button from '../../ui/Button';
-import ListItem from '../../ui/ListItem';
+import ListItem, { type MenuItemContextAction } from '../../ui/ListItem';
 import MainMenuDropdown from './MainMenuDropdown';
 import SideChatFolder from './SideChatFolder';
 
@@ -36,6 +37,9 @@ type StateProps = {
   folderInvitesById: Record<number, ApiChatlistExportedInvite[]>;
   orderedFolderIds?: number[];
   activeChatFolder: number;
+  maxFolders: number;
+  maxChatLists: number;
+  maxFolderInvites: number;
 };
 
 const SideChatFolders: FC<OwnProps & StateProps> = ({
@@ -46,7 +50,17 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
   chatFoldersById,
   orderedFolderIds,
   activeChatFolder,
+  maxFolders,
+  maxChatLists,
+  maxFolderInvites,
+  folderInvitesById,
 }) => {
+  const {
+    openShareChatFolderModal,
+    openDeleteChatFolderModal,
+    openEditChatFolder,
+    openLimitReachedModal,
+  } = getActions();
   const { isMobile } = useAppLayout();
   const lang = useLang();
   const folderCountersById = useFolderManagerForUnreadCounters();
@@ -59,7 +73,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
         return {
           id: ALL_FOLDER_ID,
           title: {
-            text: orderedFolderIds?.[0] === ALL_FOLDER_ID ? lang('FilterAllChatsShort') : lang('FilterAllChats'),
+            text: lang('FilterAllChats'),
           },
           includedChatIds: MEMO_EMPTY_ARRAY,
           excludedChatIds: MEMO_EMPTY_ARRAY,
@@ -67,23 +81,74 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
       }
       return chatFoldersById[id];
     }).filter(Boolean).map((folder, i) => {
-      const { id, title, emoticon } = folder;
-      console.log(title.text, title.entities);
+      const { id, title } = folder;
+      const canShareFolder = selectCanShareFolder(getGlobal(), id);
+      const contextActions: MenuItemContextAction[] = [];
+      if (canShareFolder) {
+        contextActions.push({
+          title: lang('FilterShare'),
+          icon: 'link',
+          handler: () => {
+            const chatListCount = Object.values(chatFoldersById).reduce((acc, el) => acc + (el.isChatList ? 1 : 0), 0);
+            if (chatListCount >= maxChatLists && !folder.isChatList) {
+              openLimitReachedModal({
+                limit: 'chatlistJoined',
+              });
+              return;
+            }
+
+            // Greater amount can be after premium downgrade
+            if (folderInvitesById[id]?.length >= maxFolderInvites) {
+              openLimitReachedModal({
+                limit: 'chatlistInvites',
+              });
+              return;
+            }
+
+            openShareChatFolderModal({
+              folderId: id,
+            });
+          },
+        });
+      }
+
+      if (id !== ALL_FOLDER_ID) {
+        contextActions.push({
+          title: lang('FilterEdit'),
+          icon: 'edit',
+          handler: () => {
+            openEditChatFolder({ folderId: id });
+          },
+        });
+
+        contextActions.push({
+          title: lang('FilterDelete'),
+          icon: 'delete',
+          destructive: true,
+          handler: () => {
+            openDeleteChatFolderModal({ folderId: id });
+          },
+        });
+      }
+      let emoticon = folder.emoticon;
+      if (!emoticon) {
+        if (folder.bots) emoticon = '🤖';
+        if (folder.groups) emoticon = '👥';
+        if (folder.channels) emoticon = '📢';
+        if (folder.contacts || folder.nonContacts) emoticon = '👤';
+      }
+
       return {
         index: i,
         id,
         emoticon,
-        entities: title.entities,
-        title: renderTextWithEntities({
-          text: title.text,
-          entities: title.entities,
-          noCustomEmojiPlayback: folder.noTitleAnimations,
-        }),
+        title,
         badgeCount: folderCountersById[id]?.chatsCount,
         isBadgeActive: Boolean(folderCountersById[id]?.notificationsCount),
+        contextActions: contextActions?.length ? contextActions : undefined,
       };
     });
-  }, [chatFoldersById, folderCountersById, lang, orderedFolderIds]);
+  }, [chatFoldersById, folderCountersById, folderInvitesById, lang, maxChatLists, maxFolderInvites, orderedFolderIds]);
 
   return (
     <div id="LeftColumn-folders">
@@ -96,7 +161,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
         onSelectArchived={onSelectArchived}
         onReset={onReset}
       />
-      <div className="folder-list">
+      <div className="folder-list custom-scroll">
         {chatFolders?.map((folder) => {
           return (
             <SideChatFolder
@@ -104,9 +169,9 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
               index={folder.index}
               title={folder.title}
               emoticon={folder.emoticon}
-              entities={folder.entities}
               badgeCount={folder.badgeCount}
               badgeActive={folder.isBadgeActive}
+              contextActions={folder.contextActions}
             />
           );
         })}
@@ -132,6 +197,9 @@ export default memo(withGlobal<OwnProps>(
       orderedFolderIds,
       folderInvitesById,
       activeChatFolder,
+      maxFolders: selectCurrentLimit(global, 'dialogFilters'),
+      maxFolderInvites: selectCurrentLimit(global, 'chatlistInvites'),
+      maxChatLists: selectCurrentLimit(global, 'chatlistJoined'),
     };
   },
 )(SideChatFolders));
