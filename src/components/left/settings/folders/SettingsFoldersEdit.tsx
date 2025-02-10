@@ -283,10 +283,6 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
     );
   }
 
-  const handleIconFolder = useCallback((icon: string) => {
-    dispatch({ type: 'setIcon', payload: icon });
-  }, [dispatch]);
-
   const addEmoji = useCallback((title: string, emoji: string) => {
     const emojiRegex = /(?=\p{Emoji})(?!\p{Number})/u;
     const split = title.split(' ');
@@ -304,6 +300,11 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
     }
     return { text: split.join(' ').trim(), offset };
   }, []);
+
+  const handleIconFolder = useCallback((icon: string) => {
+    dispatch({ type: 'setTitle', payload: { text: addEmoji(state.folder.title.text, '').text } });
+    dispatch({ type: 'setIcon', payload: icon });
+  }, [addEmoji, dispatch, state.folder.title.text]);
 
   const handleIconEmoji = useCallback((icon: string) => {
     dispatch({ type: 'setIcon', payload: undefined });
