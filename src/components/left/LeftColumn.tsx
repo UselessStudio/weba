@@ -17,6 +17,7 @@ import {
 } from '../../util/windowEnvironment';
 
 import useFoldersReducer from '../../hooks/reducers/useFoldersReducer';
+import useAppLayout from '../../hooks/useAppLayout';
 import { useHotkeys } from '../../hooks/useHotkeys';
 import useLastCallback from '../../hooks/useLastCallback';
 import usePrevious from '../../hooks/usePrevious';
@@ -26,6 +27,7 @@ import useSyncEffect from '../../hooks/useSyncEffect';
 import Transition from '../ui/Transition';
 import ArchivedChats from './ArchivedChats.async';
 import LeftMain from './main/LeftMain';
+import SideChatFolders from './main/SideChatFolders';
 import NewChat from './newChat/NewChat.async';
 import Settings from './settings/Settings.async';
 
@@ -472,6 +474,7 @@ function LeftColumn({
       },
     });
   }, [prevSettingsScreenRef, ref]);
+  const [shouldRenderFolders, setShouldRenderFolders] = useState(false);
 
   function renderContent(isActive: boolean) {
     switch (contentType) {
@@ -540,26 +543,54 @@ function LeftColumn({
             isElectronUpdateAvailable={isElectronUpdateAvailable}
             isForumPanelOpen={isForumPanelOpen}
             onTopicSearch={handleTopicSearch}
+            setShouldRenderFolders={setShouldRenderFolders}
+            shouldRenderFolders={shouldRenderFolders}
           />
         );
     }
   }
+  const { isMobile } = useAppLayout();
+  const { closeForumPanel } = getActions();
+
+  const handleSelectSettings = useLastCallback(() => {
+    setContent(LeftColumnContent.Settings);
+  });
+
+  const handleSelectContacts = useLastCallback(() => {
+    setContent(LeftColumnContent.Contacts);
+  });
+
+  const handleSelectArchived = useLastCallback(() => {
+    setContent(LeftColumnContent.Archived);
+    closeForumPanel();
+  });
 
   return (
-    <Transition
-      ref={ref}
-      name={shouldSkipHistoryAnimations ? 'none' : LAYERS_ANIMATION_NAME}
-      renderCount={RENDER_COUNT}
-      activeKey={contentType}
-      shouldCleanup
-      cleanupExceptionKey={ContentType.Main}
-      shouldWrap
-      wrapExceptionKey={ContentType.Main}
-      id="LeftColumn"
-      withSwipeControl
-    >
-      {renderContent}
-    </Transition>
+    <div className="folder-container">
+      {!isMobile && shouldRenderFolders && (
+        <SideChatFolders
+          hasMenu={content === LeftColumnContent.ChatList}
+          onSelectSettings={handleSelectSettings}
+          onSelectContacts={handleSelectContacts}
+          onSelectArchived={handleSelectArchived}
+          onReset={handleReset}
+        />
+      )}
+      <Transition
+        ref={ref}
+        name={shouldSkipHistoryAnimations ? 'none' : LAYERS_ANIMATION_NAME}
+        renderCount={RENDER_COUNT}
+        activeKey={contentType}
+        shouldCleanup
+        cleanupExceptionKey={ContentType.Main}
+        shouldWrap
+        wrapExceptionKey={ContentType.Main}
+        id="LeftColumn"
+        withSwipeControl
+      >
+        {renderContent}
+      </Transition>
+    </div>
   );
 }
 

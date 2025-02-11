@@ -69,7 +69,7 @@ const SideChatFolder: FC<OwnProps> = ({
 
   const getTriggerElement = useLastCallback(() => buttonRef.current);
   const getRootElement = useLastCallback(
-    () => buttonRef.current!.closest('#LeftColumn'),
+    () => buttonRef.current!.closest('#Main'),
   );
   const getMenuElement = useLastCallback(
     () => document.querySelector('#portals')!.querySelector('.Tab-context-menu .bubble'),

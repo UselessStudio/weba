@@ -30,6 +30,7 @@ type OwnProps = {
   onSelectSettings: NoneToVoidFunction;
   onSelectContacts: NoneToVoidFunction;
   onSelectArchived: NoneToVoidFunction;
+  hasMenu: boolean;
 };
 
 type StateProps = {
@@ -51,6 +52,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
   orderedFolderIds,
   activeChatFolder,
   maxFolders,
+  hasMenu,
   maxChatLists,
   maxFolderInvites,
   folderInvitesById,
@@ -153,7 +155,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
   return (
     <div id="LeftColumn-folders">
       <MainMenuDropdown
-        hasMenu
+        hasMenu={hasMenu}
         shouldSkipTransition={false}
         isMobile={isMobile}
         onSelectSettings={onSelectSettings}

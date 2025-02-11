@@ -7,6 +7,8 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
     flex-direction: column;
     align-items: center;
     background-color: var(--color-chat-folders-background);
+    width: var(--left-column-folders-width);
+    height: 100vh;
   }
 
   .folder-list {
