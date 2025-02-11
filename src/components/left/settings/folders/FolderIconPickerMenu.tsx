@@ -163,7 +163,7 @@ const FolderIconPickerMenu: FC<OwnProps & StateProps> = ({
         <div className="EmojiPicker">
           <div
             ref={headerRef}
-            className="EmojiPicker-header"
+            className={buildClassName('EmojiPicker-header', styles.folderPickerHeader, 'custom-scroll')}
             dir={lang.isRtl ? 'rtl' : undefined}
           >
             <Button

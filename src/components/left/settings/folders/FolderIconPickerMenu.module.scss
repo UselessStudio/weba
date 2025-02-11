@@ -25,6 +25,13 @@
   }
 }
 
+.folderPickerHeader {
+  overflow-x: auto;
+  overflow-y: hidden;
+  justify-content: start !important;
+  //padding: 0.5rem;
+}
+
 .folderIcon {
   color: var(--color-text-secondary);
 }
