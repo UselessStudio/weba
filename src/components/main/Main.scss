@@ -2,6 +2,14 @@
   height: 100%;
   text-align: left;
   overflow: hidden;
+  --left-column-folders-width: 0px;
+
+  &:has(#LeftColumn-folders) {
+    .hide-with-folders {
+      display: none;
+    }
+    --left-column-folders-width: 5rem;
+  }
 
   @media (min-width: 1276px) {
     position: relative;
@@ -32,7 +40,6 @@
 }
 
 #LeftColumn {
-  --left-column-folders-width: 5rem;
   --left-column-min-width: 16rem;
   --left-column-max-width: 26.5rem;
 
@@ -174,7 +181,7 @@
     }
 
     #Main.left-column-open & {
-      transform: translate3d(calc(26.5rem + 5rem), 0, 0);
+      transform: translate3d(calc(26.5rem + var(--left-column-folders-width)), 0, 0);
     }
 
     body.no-right-column-animations #Main.right-column-open &,

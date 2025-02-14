@@ -10,7 +10,6 @@ import { ANIMATION_END_DELAY } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { ANIMATION_DURATION } from '../story/helpers/ribbonAnimation';
 
-import useAppLayout from '../../hooks/useAppLayout';
 import useForumPanelRender from '../../hooks/useForumPanelRender';
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLastCallback from '../../hooks/useLastCallback';
@@ -88,29 +87,26 @@ const ArchivedChats: FC<OwnProps> = ({
     isStoryRibbonShown, undefined, undefined, '', false, ANIMATION_DURATION + ANIMATION_END_DELAY,
   );
 
-  const { isMobile } = useAppLayout();
-
   return (
     <div className="ArchivedChats">
       <div className={buildClassName('left-header', !shouldRenderStoryRibbon && 'left-header-shadow')}>
         {lang.isRtl && <div className="DropdownMenuFiller" />}
-        {isMobile && (
-          <Button
-            round
-            size="smaller"
-            color="translucent"
-            onClick={onReset}
-            ariaLabel="Return to chat list"
-            className={buildClassName(
-              lang.isRtl && 'rtl',
-              isForumPanelVisible && lang.isRtl && 'right-aligned',
-              shouldDisableDropdownMenuTransitionRef.current && lang.isRtl && 'disable-transition',
-            )}
-            onTransitionEnd={handleDropdownMenuTransitionEnd}
-          >
-            <Icon name="arrow-left" />
-          </Button>
-        )}
+        <Button
+          round
+          size="smaller"
+          color="translucent"
+          onClick={onReset}
+          ariaLabel="Return to chat list"
+          className={buildClassName(
+            'hide-with-folders',
+            lang.isRtl && 'rtl',
+            isForumPanelVisible && lang.isRtl && 'right-aligned',
+            shouldDisableDropdownMenuTransitionRef.current && lang.isRtl && 'disable-transition',
+          )}
+          onTransitionEnd={handleDropdownMenuTransitionEnd}
+        >
+          <Icon name="arrow-left" />
+        </Button>
 
         {shouldRenderTitle && <h3 className={titleClassNames}>{lang('ArchivedChats')}</h3>}
         <div className="story-toggler-wrapper">

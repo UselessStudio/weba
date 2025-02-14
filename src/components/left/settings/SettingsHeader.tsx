@@ -1,6 +1,7 @@
 import type { FC } from '../../../lib/teact/teact';
 import React, {
-  memo, useCallback, useMemo, useState,
+  memo, useCallback, useMemo,
+  useState,
 } from '../../../lib/teact/teact';
 import { getActions } from '../../../global';
 
@@ -286,17 +287,16 @@ const SettingsHeader: FC<OwnProps> = ({
 
   return (
     <div className="left-header">
-      {isMobile && (
-        <Button
-          round
-          size="smaller"
-          color="translucent"
-          onClick={onReset}
-          ariaLabel={oldLang('AccDescrGoBack')}
-        >
-          <Icon name="arrow-left" />
-        </Button>
-      )}
+      <Button
+        round
+        size="smaller"
+        color="translucent"
+        onClick={onReset}
+        ariaLabel={oldLang('AccDescrGoBack')}
+        className="hide-with-folders"
+      >
+        <Icon name="arrow-left" />
+      </Button>
       {renderHeaderContent()}
       <ConfirmDialog
         isOpen={isSignOutDialogOpen}
