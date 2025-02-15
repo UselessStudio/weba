@@ -2,7 +2,7 @@ import type { FC, RefObject } from '../../../../lib/teact/teact';
 import React, {
   memo, useEffect, useMemo, useRef, useState,
 } from '../../../../lib/teact/teact';
-import { withGlobal } from '../../../../global';
+import { getActions, withGlobal } from '../../../../global';
 
 import type { ApiSticker, ApiStickerSet } from '../../../../api/types';
 
@@ -12,7 +12,11 @@ import {
   RECENT_SYMBOL_SET_ID,
   TOP_SYMBOL_SET_ID,
 } from '../../../../config';
-import { selectIsContextMenuTranslucent, selectIsCurrentUserPremium } from '../../../../global/selectors';
+import {
+  selectIsContextMenuTranslucent,
+  selectIsCurrentUserPremium,
+  selectIsSetPremium,
+} from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
 import {
   type EmojiData, type EmojiModule, type EmojiRawData, uncompressEmoji,
@@ -82,6 +86,7 @@ const FolderIconPickerMenu: FC<OwnProps & StateProps> = ({
   isCurrentUserPremium,
 }) => {
   const lang = useLang();
+  const { openPremiumModal } = getActions();
   const transformOriginX = useRef<number>();
   useEffect(() => {
     transformOriginX.current = buttonRef.current!.getBoundingClientRect().left;
@@ -233,7 +238,16 @@ const FolderIconPickerMenu: FC<OwnProps & StateProps> = ({
                   shouldHideHeader={shouldHideHeader}
                   isCurrentUserPremium={isCurrentUserPremium}
                   // eslint-disable-next-line react/jsx-no-bind
-                  onStickerSelect={(sticker) => onIconSelect({ _: 'sticker', sticker })}
+                  onStickerSelect={(sticker) => {
+                    if (selectIsSetPremium(stickerSet) && !isCurrentUserPremium) {
+                      onClose();
+                      openPremiumModal({
+                        initialSection: 'animated_emoji',
+                      });
+                    } else {
+                      onIconSelect({ _: 'sticker', sticker });
+                    }
+                  }}
                   forcePlayback
                 />
               );

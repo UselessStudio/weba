@@ -32,6 +32,7 @@ const FolderIconButton: FC<OwnProps> = ({
   const handleIconSelect = useCallback((icon: { _: 'sticker'; sticker: ApiSticker }
   | { _: 'icon'; icon: typeof FOLDER_ICONS[number] }
   | { _: 'emoji'; emoji: string }) => {
+    closeStatusPicker();
     switch (icon._) {
       case 'sticker':
         setIconSticker(icon.sticker);
