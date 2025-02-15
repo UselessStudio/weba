@@ -49,7 +49,7 @@ import {
   selectIsChatBotNotStarted,
   selectIsInSelectMode,
   selectIsRightColumnShown,
-  selectIsUserBlocked,
+  selectIsUserBlocked, selectPerformanceSettingsValue,
   selectPinnedIds,
   selectTabState,
   selectTheme,
@@ -86,6 +86,7 @@ import SeenByModal from '../common/SeenByModal.async';
 import UnpinAllMessagesModal from '../common/UnpinAllMessagesModal.async';
 import Button from '../ui/Button';
 import Transition from '../ui/Transition';
+import AnimatedBackground from './background/AnimatedBackground';
 import ChatLanguageModal from './ChatLanguageModal.async';
 import { DropAreaState } from './composer/DropArea';
 import EmojiInteractionAnimation from './EmojiInteractionAnimation.async';
@@ -107,6 +108,7 @@ interface OwnProps {
 }
 
 type StateProps = {
+  shouldAnimateBackground?: boolean;
   chatId?: string;
   threadId?: ThreadId;
   isComments?: boolean;
@@ -167,6 +169,7 @@ const LAYER_ANIMATION_DURATION_MS = 450 + ANIMATION_END_DELAY;
 function MiddleColumn({
   leftColumnRef,
   chatId,
+  shouldAnimateBackground,
   threadId,
   isComments,
   messageListType,
@@ -504,7 +507,9 @@ function MiddleColumn({
       <div
         className={bgClassName}
         style={customBackgroundValue ? `--custom-background: ${customBackgroundValue}` : undefined}
-      />
+      >
+        {!customBackground && !backgroundColor && shouldAnimateBackground && <AnimatedBackground />}
+      </div>
       <div id="middle-column-portals" />
       {Boolean(renderingChatId && renderingThreadId) && (
         <>
@@ -729,6 +734,7 @@ export default memo(withGlobal<OwnProps>(
     const { leftColumnWidth } = global;
 
     const state: StateProps = {
+      shouldAnimateBackground: selectPerformanceSettingsValue(global, 'messageSendingAnimations'),
       theme,
       customBackground,
       backgroundColor,

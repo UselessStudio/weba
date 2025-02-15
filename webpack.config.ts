@@ -160,6 +160,10 @@ export default function createConfig(
           test: /\.(txt|tl|strings)$/i,
           type: 'asset/source',
         },
+        {
+          test: /\.glsl$/i,
+          type: 'asset/source',
+        },
       ],
     },
 

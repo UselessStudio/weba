@@ -50,7 +50,7 @@ export default function useFocusMessage({
       const exec = () => {
         const maxDistance = focusDirection !== undefined
           ? (isToBottom ? BOTTOM_FOCUS_OFFSET : RELOCATED_FOCUS_OFFSET) : undefined;
-
+        window.dispatchEvent(new CustomEvent('animateBackground'));
         const result = animateScroll({
           container: messagesContainer,
           element: elementRef.current!,

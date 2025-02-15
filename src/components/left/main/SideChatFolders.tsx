@@ -2,24 +2,18 @@ import type { FC } from '../../../lib/teact/teact';
 import React, { memo, useMemo } from '../../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../../global';
 
-import type { ApiChatFolder, ApiChatlistExportedInvite, ApiSession } from '../../../api/types';
-import type { GlobalState } from '../../../global/types';
+import type { ApiChatFolder, ApiChatlistExportedInvite } from '../../../api/types';
 
 import { ALL_FOLDER_ID } from '../../../config';
 import { selectCanShareFolder, selectTabState } from '../../../global/selectors';
 import { selectCurrentLimit } from '../../../global/selectors/limits';
-import buildClassName from '../../../util/buildClassName';
 import { MEMO_EMPTY_ARRAY } from '../../../util/memo';
-import { renderTextWithEntities } from '../../common/helpers/renderTextWithEntities';
 
 import useAppLayout from '../../../hooks/useAppLayout';
 import { useFolderManagerForUnreadCounters } from '../../../hooks/useFolderManager';
 import useLang from '../../../hooks/useLang';
-import useLastCallback from '../../../hooks/useLastCallback';
 
-import Icon from '../../common/icons/Icon';
-import Button from '../../ui/Button';
-import ListItem, { type MenuItemContextAction } from '../../ui/ListItem';
+import { type MenuItemContextAction } from '../../ui/ListItem';
 import MainMenuDropdown from './MainMenuDropdown';
 import SideChatFolder from './SideChatFolder';
 
@@ -51,7 +45,6 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
   chatFoldersById,
   orderedFolderIds,
   activeChatFolder,
-  maxFolders,
   hasMenu,
   maxChatLists,
   maxFolderInvites,
