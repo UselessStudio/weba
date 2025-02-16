@@ -131,7 +131,7 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
           return allChatsFolder;
         }
 
-        return chatFoldersById[id] || {};
+        return chatFoldersById[id];
       }).filter(Boolean)
       : undefined;
   }, [chatFoldersById, allChatsFolder, orderedFolderIds]);

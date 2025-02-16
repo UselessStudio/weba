@@ -145,11 +145,13 @@ const SideChatFolder: FC<OwnProps> = ({
   }, [id, onDrag, disableDrag]);
 
   const onMouseUp = useCallback(() => {
-    setState((s) => ({
-      ...s,
-      isDragging: false,
-    }));
-    onDragEnd?.();
+    setState((s) => {
+      if (s.isDragging) onDragEnd?.();
+      return {
+        ...s,
+        isDragging: false,
+      };
+    });
   }, [onDragEnd]);
 
   useEffect(() => {

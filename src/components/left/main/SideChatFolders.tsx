@@ -1,6 +1,7 @@
 import type { FC } from '../../../lib/teact/teact';
 import React, {
-  memo, useCallback, useMemo, useState,
+  memo, useCallback, useEffect,
+  useMemo, useState,
 } from '../../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../../global';
 
@@ -16,6 +17,7 @@ import useAppLayout from '../../../hooks/useAppLayout';
 import { useFolderManagerForUnreadCounters } from '../../../hooks/useFolderManager';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
+import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
 
 import { type MenuItemContextAction } from '../../ui/ListItem';
 import MainMenuDropdown from './MainMenuDropdown';
@@ -131,10 +133,10 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
         if (folder.channels) emoticon = '📢';
         if (folder.contacts || folder.nonContacts) emoticon = '👤';
       }
-      const i = orderedFolderIds?.indexOf(folder.id);
+      const index = orderedFolderIds?.filter((i) => i === ALL_FOLDER_ID || chatFoldersById[i]).indexOf(folder.id);
 
       return {
-        index: i,
+        index,
         id,
         emoticon,
         title,
@@ -151,6 +153,19 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
     translation: 0,
     dragOrderIds: orderedFolderIds,
   });
+
+  const prevFolderIds = usePreviousDeprecated(orderedFolderIds);
+
+  // Sync folders state after changing folders in other clients
+  useEffect(() => {
+    if (prevFolderIds !== orderedFolderIds) {
+      setState((s) => ({
+        ...s,
+        dragOrderIds: orderedFolderIds,
+        draggedId: undefined,
+      }));
+    }
+  }, [prevFolderIds, orderedFolderIds]);
 
   const folderHeight = useLastCallback(() => {
     return 4.5 * parseFloat(getComputedStyle(document.documentElement).fontSize);
