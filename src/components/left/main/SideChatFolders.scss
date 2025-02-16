@@ -75,6 +75,7 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
     background-color: var(--color-chat-folders-background);
     position: absolute;
     left: 0;
+    transition: top 0.15s linear;
     width: var(--left-column-folders-width);
     height: var(--left-column-folders-height);
     flex-direction: column;
