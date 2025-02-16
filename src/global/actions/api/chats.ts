@@ -1870,7 +1870,7 @@ addActionHandler('setActiveChatFolder', (global, actions, payload): ActionReturn
   const { activeChatFolder, tabId = getCurrentTabId() } = payload;
   const maxFolders = selectCurrentLimit(global, 'dialogFilters');
 
-  const isBlocked = activeChatFolder + 1 > maxFolders;
+  const isBlocked = (global.chatFolders.orderedIds?.indexOf(activeChatFolder) ?? 0) + 1 > maxFolders;
 
   if (isBlocked) {
     actions.openLimitReachedModal({

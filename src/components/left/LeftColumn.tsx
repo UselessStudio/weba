@@ -618,6 +618,9 @@ export default memo(withGlobal<OwnProps>(
       isAppUpdateAvailable,
       isElectronUpdateAvailable,
       archiveSettings,
+      chatFolders: {
+        orderedIds,
+      },
     } = global;
 
     const currentChat = selectCurrentChat(global);
@@ -628,7 +631,7 @@ export default memo(withGlobal<OwnProps>(
     return {
       searchQuery: query,
       searchDate: minDate,
-      isFirstChatFolderActive: activeChatFolder === 0,
+      isFirstChatFolderActive: orderedIds?.[activeChatFolder] === 0,
       shouldSkipHistoryAnimations,
       currentUserId,
       hasPasscode,

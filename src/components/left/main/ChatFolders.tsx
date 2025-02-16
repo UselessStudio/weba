@@ -26,6 +26,7 @@ import { useFolderManagerForUnreadCounters } from '../../../hooks/useFolderManag
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
+import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
 import useShowTransition from '../../../hooks/useShowTransition';
 
 import StoryRibbon from '../../story/StoryRibbon';
@@ -135,9 +136,8 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
       : undefined;
   }, [chatFoldersById, allChatsFolder, orderedFolderIds]);
 
-  const allChatsFolderIndex = displayedFolders?.findIndex((folder) => folder.id === ALL_FOLDER_ID);
-  const isInAllChatsFolder = allChatsFolderIndex === activeChatFolder;
-  const isInFirstFolder = FIRST_FOLDER_INDEX === activeChatFolder;
+  const isInAllChatsFolder = ALL_FOLDER_ID === activeChatFolder;
+  const isInFirstFolder = displayedFolders?.[FIRST_FOLDER_INDEX]?.id === activeChatFolder;
 
   const folderCountersById = useFolderManagerForUnreadCounters();
   const folderTabs = useMemo(() => {
@@ -217,7 +217,9 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
   ]);
 
   const handleSwitchTab = useLastCallback((index: number) => {
-    setActiveChatFolder({ activeChatFolder: index }, { forceOnHeavyAnimation: true });
+    setActiveChatFolder({
+      activeChatFolder: folderTabs?.[index]?.id ?? ALL_FOLDER_ID,
+    }, { forceOnHeavyAnimation: true });
   });
 
   // Prevent `activeTab` pointing at non-existing folder after update
@@ -226,10 +228,14 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
       return;
     }
 
-    if (activeChatFolder >= folderTabs.length) {
-      setActiveChatFolder({ activeChatFolder: FIRST_FOLDER_INDEX });
+    if ((displayedFolders?.indexOf(chatFoldersById[activeChatFolder]) ?? 0) >= folderTabs.length) {
+      setActiveChatFolder({ activeChatFolder: ALL_FOLDER_ID });
     }
-  }, [activeChatFolder, folderTabs, setActiveChatFolder]);
+  }, [activeChatFolder, chatFoldersById, displayedFolders, folderTabs, setActiveChatFolder]);
+
+  const currentTabIndex = useMemo(() => {
+    return (folderTabs?.findIndex((f) => f.id === activeChatFolder) ?? 0);
+  }, [activeChatFolder, folderTabs]);
 
   useEffect(() => {
     if (!IS_TOUCH_ENV || !folderTabs?.length || isForumPanelOpen) {
@@ -241,31 +247,38 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
       onSwipe: ((e, direction) => {
         if (direction === SwipeDirection.Left) {
           setActiveChatFolder(
-            { activeChatFolder: Math.min(activeChatFolder + 1, folderTabs.length - 1) },
+            { activeChatFolder: folderTabs[Math.min(currentTabIndex + 1, folderTabs.length - 1)].id },
             { forceOnHeavyAnimation: true },
           );
           return true;
         } else if (direction === SwipeDirection.Right) {
-          setActiveChatFolder({ activeChatFolder: Math.max(0, activeChatFolder - 1) }, { forceOnHeavyAnimation: true });
+          setActiveChatFolder({
+            activeChatFolder: folderTabs[Math.max(0, currentTabIndex - 1)].id,
+          }, { forceOnHeavyAnimation: true });
           return true;
         }
 
         return false;
       }),
     });
-  }, [activeChatFolder, folderTabs, isForumPanelOpen, setActiveChatFolder]);
+  }, [
+    activeChatFolder, chatFoldersById, currentTabIndex, displayedFolders, folderTabs, isForumPanelOpen,
+    setActiveChatFolder,
+  ]);
 
   const isNotInFirstFolderRef = useRef();
   isNotInFirstFolderRef.current = !isInFirstFolder;
   useEffect(() => (isNotInFirstFolderRef.current ? captureEscKeyListener(() => {
     if (isNotInFirstFolderRef.current) {
-      setActiveChatFolder({ activeChatFolder: FIRST_FOLDER_INDEX });
+      setActiveChatFolder({ activeChatFolder: folderTabs?.[FIRST_FOLDER_INDEX].id ?? ALL_FOLDER_ID });
     }
-  }) : undefined), [activeChatFolder, setActiveChatFolder]);
+  }) : undefined), [activeChatFolder, folderTabs, setActiveChatFolder]);
 
   useHistoryBack({
     isActive: !isInFirstFolder,
-    onBack: () => setActiveChatFolder({ activeChatFolder: FIRST_FOLDER_INDEX }, { forceOnHeavyAnimation: true }),
+    onBack: () => setActiveChatFolder({
+      activeChatFolder: folderTabs?.[FIRST_FOLDER_INDEX].id ?? ALL_FOLDER_ID,
+    }, { forceOnHeavyAnimation: true }),
   });
 
   useEffect(() => {
@@ -282,7 +295,7 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
         const folder = Number(digit) - 1;
         if (folder > folderTabs.length - 1) return;
 
-        setActiveChatFolder({ activeChatFolder: folder }, { forceOnHeavyAnimation: true });
+        setActiveChatFolder({ activeChatFolder: folderTabs[folder].id }, { forceOnHeavyAnimation: true });
         e.preventDefault();
       }
     };
@@ -304,8 +317,7 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
   });
 
   function renderCurrentTab(isActive: boolean) {
-    const activeFolder = Object.values(chatFoldersById)
-      .find(({ id }) => id === folderTabs![activeChatFolder].id);
+    const activeFolder = chatFoldersById[activeChatFolder];
     const isFolder = activeFolder && !isInAllChatsFolder;
 
     return (
@@ -326,6 +338,8 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
 
   const shouldRenderFolders = folderTabs && folderTabs.length > 1;
 
+  const prevTabIndex = usePreviousDeprecated<any>(currentTabIndex);
+
   useEffect(() => {
     setShouldRenderFolders?.(!!shouldRenderFolders);
   }, [setShouldRenderFolders, shouldRenderFolders]);
@@ -344,7 +358,7 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
         <TabList
           contextRootElementSelector="#LeftColumn"
           tabs={folderTabs}
-          activeTab={activeChatFolder}
+          activeTab={currentTabIndex}
           onSwitchTab={handleSwitchTab}
         />
       ) : isForumPanelOpen && shouldRenderPlaceholder ? (
@@ -353,8 +367,9 @@ const ChatFolders: FC<OwnProps & StateProps> = ({
       <Transition
         ref={transitionRef}
         name={shouldSkipHistoryAnimations ? 'none' : lang.isRtl ? 'slideOptimizedRtl' : 'slideOptimized'}
+        direction={currentTabIndex > prevTabIndex ? 1 : -1}
         activeKey={activeChatFolder}
-        renderCount={shouldRenderFolders ? folderTabs.length : undefined}
+        // renderCount={shouldRenderFolders ? folderTabs.length : undefined}
       >
         {renderCurrentTab}
       </Transition>

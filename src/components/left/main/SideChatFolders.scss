@@ -2,6 +2,8 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
 
 
 #LeftColumn-folders {
+  --left-column-folders-height: 4.5rem;
+
   & {
     display: flex;
     flex-direction: column;
@@ -13,6 +15,10 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
 
   .folder-list {
     overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    width: 100%;
+    height: 100%;
   }
 
   .chat-folder {
@@ -66,7 +72,11 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
   }
 
   .folder-list .Button {
-    height: auto;
+    background-color: var(--color-chat-folders-background);
+    position: absolute;
+    left: 0;
+    width: var(--left-column-folders-width);
+    height: var(--left-column-folders-height);
     flex-direction: column;
   }
   .DropdownMenu {

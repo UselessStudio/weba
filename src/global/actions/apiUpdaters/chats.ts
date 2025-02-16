@@ -2,7 +2,7 @@ import type { ApiMessage, ApiUpdateChat } from '../../../api/types';
 import type { ActionReturnType } from '../../types';
 import { MAIN_THREAD_ID } from '../../../api/types';
 
-import { ARCHIVED_FOLDER_ID, MAX_ACTIVE_PINNED_CHATS } from '../../../config';
+import { ALL_FOLDER_ID, ARCHIVED_FOLDER_ID, MAX_ACTIVE_PINNED_CHATS } from '../../../config';
 import { buildCollectionByKey, omit } from '../../../util/iteratees';
 import { isLocalMessageId } from '../../../util/keys/messageKey';
 import { closeMessageNotifications, notifyAboutMessage } from '../../../util/notifications';
@@ -332,10 +332,10 @@ addActionHandler('apiUpdate', (global, actions, update): ActionReturnType => {
 
       Object.values(global.byTabId).forEach(({ id: tabId }) => {
         const tabState = selectTabState(global, tabId);
-        const isFolderActive = Object.values(chatFoldersById)[tabState.activeChatFolder - 1]?.id === id;
+        const isFolderActive = chatFoldersById[tabState.activeChatFolder]?.id === id;
 
         if (isFolderActive) {
-          global = updateTabState(global, { activeChatFolder: 0 }, tabId);
+          global = updateTabState(global, { activeChatFolder: ALL_FOLDER_ID }, tabId);
         }
       });
 

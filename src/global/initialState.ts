@@ -3,6 +3,7 @@ import type { GlobalState, TabState } from './types';
 import { NewChatMembersProgress } from '../types';
 
 import {
+  ALL_FOLDER_ID,
   ANIMATION_LEVEL_DEFAULT,
   DARK_THEME_PATTERN_COLOR,
   DEFAULT_MESSAGE_TEXT_SIZE_PX,
@@ -328,7 +329,7 @@ export const INITIAL_TAB_STATE: TabState = {
   stickerSearch: {},
 
   messageLists: [],
-  activeChatFolder: 0,
+  activeChatFolder: ALL_FOLDER_ID,
   tabThreads: {},
 
   inlineBots: {
