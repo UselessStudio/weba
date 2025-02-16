@@ -29,6 +29,7 @@ type OwnProps = {
   emoticon?: string;
   badgeCount?: number;
   badgeActive: boolean;
+  noTitleAnimations?: boolean;
   contextActions?: MenuItemContextAction[];
 };
 
@@ -40,6 +41,7 @@ const SideChatFolder: FC<OwnProps> = ({
   badgeCount,
   emoticon,
   contextActions,
+  noTitleAnimations,
 }) => {
   const {
     setActiveChatFolder,
@@ -57,8 +59,17 @@ const SideChatFolder: FC<OwnProps> = ({
     if (index === 0) {
       return <Icon name="folder-chats" className="icons-chat-folder" />;
     }
-    return <FolderIcon className="icons-chat-folder" title={title} emoticon={emoticon} size={40} isBig />;
-  }, [index, emoticon, title]);
+    return (
+      <FolderIcon
+        className="icons-chat-folder"
+        title={title}
+        emoticon={emoticon}
+        size={40}
+        isBig
+        noTitleAnimations={noTitleAnimations}
+      />
+    );
+  }, [noTitleAnimations, index, emoticon, title]);
 
   // eslint-disable-next-line no-null/no-null
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -90,8 +101,9 @@ const SideChatFolder: FC<OwnProps> = ({
     return renderTextWithEntities({
       text: text.join(' '),
       entities: title.entities,
+      noCustomEmojiPlayback: noTitleAnimations,
     });
-  }, [title]);
+  }, [noTitleAnimations, title]);
 
   return (
     <Button

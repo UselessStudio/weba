@@ -141,6 +141,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
         badgeCount: folderCountersById[id]?.chatsCount,
         isBadgeActive: Boolean(folderCountersById[id]?.notificationsCount),
         contextActions: contextActions?.length ? contextActions : undefined,
+        noTitleAnimations: folder.noTitleAnimations,
       };
     });
   }, [chatFoldersById, folderCountersById, folderInvitesById, lang, maxChatLists, maxFolderInvites, orderedFolderIds]);
@@ -167,6 +168,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
               badgeCount={folder.badgeCount}
               badgeActive={folder.isBadgeActive}
               contextActions={folder.contextActions}
+              noTitleAnimations={folder.noTitleAnimations}
             />
           );
         })}

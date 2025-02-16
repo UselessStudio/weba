@@ -17,10 +17,11 @@ type OwnProps = {
   emoticon?: string;
   size?: number;
   isBig?: boolean;
+  noTitleAnimations?: boolean;
 };
 
 const FolderIcon: FC<OwnProps> = ({
-  className, title, emoticon, size, isBig,
+  className, title, emoticon, size, isBig, noTitleAnimations,
 }) => {
   const icon = useMemo(() => {
     switch (emoticon) {
@@ -55,9 +56,10 @@ const FolderIcon: FC<OwnProps> = ({
         size={size}
         isBig
         loopLimit={EMOJI_STATUS_LOOP_LIMIT}
+        noPlay={noTitleAnimations}
       />
     );
-  }, [className, size, title.entities]);
+  }, [className, size, title.entities, noTitleAnimations]);
 
   const emoji = useMemo(() => {
     const emojiRegex = /(?=\p{Emoji})(?!\p{Number})/u;
