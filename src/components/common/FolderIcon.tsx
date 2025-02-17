@@ -4,9 +4,7 @@ import React, { memo, useMemo } from '../../lib/teact/teact';
 import type { ApiFormattedText } from '../../api/types';
 import { ApiMessageEntityTypes } from '../../api/types';
 
-import { EMOJI_STATUS_LOOP_LIMIT } from '../../config';
 import renderText from './helpers/renderText';
-import { renderTextWithEntities } from './helpers/renderTextWithEntities';
 
 import CustomEmoji from './CustomEmoji';
 import Icon from './icons/Icon';
@@ -55,7 +53,6 @@ const FolderIcon: FC<OwnProps> = ({
         documentId={title.entities[0].documentId}
         size={size}
         isBig
-        loopLimit={EMOJI_STATUS_LOOP_LIMIT}
         noPlay={noTitleAnimations}
       />
     );
