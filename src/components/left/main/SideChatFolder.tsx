@@ -155,14 +155,20 @@ const SideChatFolder: FC<OwnProps> = ({
   }, [onDragEnd]);
 
   useEffect(() => {
-    window.addEventListener('mouseup', onMouseUp);
-    window.addEventListener('mousemove', onMouseMove);
-
-    return () => {
+    const cleanup = () => {
       window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mousemove', onMouseMove);
     };
-  }, [onMouseMove, onMouseUp]);
+
+    if (state.isDragging) {
+      window.addEventListener('mouseup', onMouseUp);
+      window.addEventListener('mousemove', onMouseMove);
+    } else {
+      cleanup();
+    }
+
+    return cleanup;
+  }, [state, onMouseMove, onMouseUp]);
 
   return (
     <Button
