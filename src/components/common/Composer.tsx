@@ -2418,12 +2418,12 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     selectionTimeoutRef.current = window.setTimeout(processSelection, SELECTION_RECALCULATE_DELAY_MS);
   }
 
-  useLayoutEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.position = 'absolute';
-      textareaRef.current.style.top = '-80px';
-    }
-  }, []);
+  // useLayoutEffect(() => {
+  //   if (textareaRef.current) {
+  //     textareaRef.current.style.position = 'absolute';
+  //     textareaRef.current.style.top = '-80px';
+  //   }
+  // }, []);
 
   function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
     if (e.button !== 2) {
@@ -3911,7 +3911,6 @@ const Composer: FC<OwnProps & StateProps> = ({
   useEffect(() => {
     if (!isComposerBlocked) return;
 
-    console.log('232131');
     setHtml('');
   }, [isComposerBlocked, setHtml, attachments]);
 
