@@ -230,6 +230,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
           const index = state.dragOrderIds?.indexOf(folder.id) ?? 0;
           return (
             <SideChatFolder
+              onReset={onReset}
               active={folder.id === activeChatFolder}
               id={folder.id}
               title={folder.title}

@@ -37,6 +37,7 @@ type OwnProps = {
   onDragEnd?: () => void;
   disableDrag?: boolean;
   id: number;
+  onReset?: NoneToVoidFunction;
 };
 
 const SideChatFolder: FC<OwnProps> = ({
@@ -52,6 +53,7 @@ const SideChatFolder: FC<OwnProps> = ({
   onDragEnd,
   disableDrag,
   id,
+  onReset,
 }) => {
   const {
     setActiveChatFolder,
@@ -120,7 +122,8 @@ const SideChatFolder: FC<OwnProps> = ({
   const handleFolderClick = useCallback(() => {
     if (state.isDragging && Math.abs(state.translate) > 5) return;
     setActiveChatFolder({ activeChatFolder: id }, { forceOnHeavyAnimation: true });
-  }, [id, state.isDragging, state.translate]);
+    onReset?.();
+  }, [id, onReset, state.isDragging, state.translate]);
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     if (disableDrag) return;
