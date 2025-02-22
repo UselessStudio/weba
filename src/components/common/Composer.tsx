@@ -593,11 +593,6 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
     return b.length - a.length;
   });
 
-  console.log({
-    text: text.trim(),
-    entities: entities.length > 0 ? entities : undefined,
-  });
-
   return {
     text: text.trim(),
     entities: entities.length > 0 ? entities : undefined,
@@ -1381,7 +1376,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
       if (coords) {
         Object.assign(caretRef.current.style, {
           left: `${coords.left}px`,
-          top: `${coords.top}px`
+          top: `${coords.top}px`,
         });
       }
     } else {
@@ -2333,7 +2328,6 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
       return;
     }
 
-    console.log(canAutoFocus);
     if (canAutoFocus) {
       focusInput();
     }
