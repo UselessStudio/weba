@@ -387,6 +387,9 @@ interface TextEditorProps {
   textRendererRef?: React.RefObject<HTMLElement>;
   getText: () => string;
   setText: (text: string) => void;
+  onMouseDown?: (e: React.MouseEvent<HTMLDivElement, MouseEvent>) => void;
+  setSelection: (newValue: (((current: Selection) => Selection) | Selection)) => void;
+  selection: Selection;
 }
 
 interface Selection {
@@ -1330,8 +1333,10 @@ const TextEditor: React.FC<TextEditorProps> = ({
   onBlur,
   setText,
   getText,
+  onMouseDown,
+  setSelection,
+  selection,
 }) => {
-  const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
   let contentRef = useRef<HTMLDivElement>();
   let textareaRef = useRef<HTMLTextAreaElement>();
   const caretRef = useRef<HTMLDivElement>();
@@ -1373,7 +1378,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
       textarea.removeEventListener('keyup', handleSelectionChange);
       textarea.addEventListener('focus', handleSelectionChange);
     };
-  }, []);
+  }, [setSelection]);
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
@@ -1476,6 +1481,8 @@ const TextEditor: React.FC<TextEditorProps> = ({
       textareaRef.current.selectionStart = position;
       textareaRef.current.selectionEnd = position;
     }
+
+    onMouseDown?.(e);
 
     setTimeout(() => {
       textareaRef.current!.focus();
@@ -1764,9 +1771,11 @@ const INPUT_CUSTOM_EMOJI_SELECTOR = 'img[data-document-id]';
 export type TextFormatterProps = {
   isOpen: boolean;
   anchorPosition?: IAnchorPosition;
-  selectedRange?: Range;
-  setSelectedRange: (range: Range) => void;
   onClose: () => void;
+  setSelection: (range: Selection) => void;
+  selection: Selection;
+  setText: (html: string) => void;
+  getText: Signal<string>;
 };
 
 interface ISelectedTextFormats {
@@ -1778,24 +1787,14 @@ interface ISelectedTextFormats {
   spoiler?: boolean;
 }
 
-const TEXT_FORMAT_BY_TAG_NAME: Record<string, keyof ISelectedTextFormats> = {
-  B: 'bold',
-  STRONG: 'bold',
-  I: 'italic',
-  EM: 'italic',
-  U: 'underline',
-  DEL: 'strikethrough',
-  CODE: 'monospace',
-  SPAN: 'spoiler',
-};
-const fragmentEl = document.createElement('div');
-
 const TextFormatter: FC<TextFormatterProps> = ({
   isOpen,
   anchorPosition,
-  selectedRange,
-  setSelectedRange,
   onClose,
+  setSelection,
+  selection,
+  setText,
+  getText,
 }) => {
   // eslint-disable-next-line no-null/no-null
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1804,7 +1803,6 @@ const TextFormatter: FC<TextFormatterProps> = ({
   const { shouldRender, transitionClassNames } = useShowTransitionDeprecated(isOpen);
   const [isLinkControlOpen, openLinkControl, closeLinkControl] = useFlag();
   const [linkUrl, setLinkUrl] = useState('');
-  const [isEditingLink, setIsEditingLink] = useState(false);
   const [inputClassName, setInputClassName] = useState<string | undefined>();
   const [selectedTextFormats, setSelectedTextFormats] = useState<ISelectedTextFormats>({});
 
@@ -1833,91 +1831,8 @@ const TextFormatter: FC<TextFormatterProps> = ({
     }
   }, [closeLinkControl, shouldRender]);
 
-  useEffect(() => {
-    if (!isOpen || !selectedRange) {
-      return;
-    }
-
-    const selectedFormats: ISelectedTextFormats = {};
-    let { parentElement } = selectedRange.commonAncestorContainer;
-    while (parentElement && parentElement.id !== EDITABLE_INPUT_ID) {
-      const textFormat = TEXT_FORMAT_BY_TAG_NAME[parentElement.tagName];
-      if (textFormat) {
-        selectedFormats[textFormat] = true;
-      }
-
-      parentElement = parentElement.parentElement;
-    }
-
-    setSelectedTextFormats(selectedFormats);
-  }, [isOpen, selectedRange, openLinkControl]);
-
-  const restoreSelection = useLastCallback(() => {
-    if (!selectedRange) {
-      return;
-    }
-
-    const selection = window.getSelection();
-    if (selection) {
-      selection.removeAllRanges();
-      selection.addRange(selectedRange);
-    }
-  });
-
-  const updateSelectedRange = useLastCallback(() => {
-    const selection = window.getSelection();
-    if (selection) {
-      setSelectedRange(selection.getRangeAt(0));
-    }
-  });
-
-  const getSelectedText = useLastCallback((shouldDropCustomEmoji?: boolean) => {
-    if (!selectedRange) {
-      return undefined;
-    }
-    fragmentEl.replaceChildren(selectedRange.cloneContents());
-    if (shouldDropCustomEmoji) {
-      fragmentEl.querySelectorAll(INPUT_CUSTOM_EMOJI_SELECTOR).forEach((el) => {
-        el.replaceWith(el.getAttribute('alt')!);
-      });
-    }
-    return fragmentEl.innerHTML;
-  });
-
-  const getSelectedElement = useLastCallback(() => {
-    if (!selectedRange) {
-      return undefined;
-    }
-
-    return selectedRange.commonAncestorContainer.parentElement;
-  });
-
-  function updateInputStyles() {
-    const input = linkUrlInputRef.current;
-    if (!input) {
-      return;
-    }
-
-    const { offsetWidth, scrollWidth, scrollLeft } = input;
-    if (scrollWidth <= offsetWidth) {
-      setInputClassName(undefined);
-      return;
-    }
-
-    let className = '';
-    if (scrollLeft < scrollWidth - offsetWidth) {
-      className = 'mask-right';
-    }
-    if (scrollLeft > 0) {
-      className += ' mask-left';
-    }
-
-    setInputClassName(className);
-  }
-
   function handleLinkUrlChange(e: React.ChangeEvent<HTMLInputElement>) {
     setLinkUrl(e.target.value);
-    updateInputStyles();
   }
 
   function getFormatButtonClassName(key: keyof ISelectedTextFormats) {
@@ -1939,44 +1854,27 @@ const TextFormatter: FC<TextFormatterProps> = ({
   }
 
   const handleSpoilerText = useLastCallback(() => {
-    if (selectedTextFormats.spoiler) {
-      const element = getSelectedElement();
-      if (
-        !selectedRange
-        || !element
-        || element.dataset.entityType !== ApiMessageEntityTypes.Spoiler
-        || !element.textContent
-      ) {
-        return;
-      }
-
-      element.replaceWith(element.textContent);
-      setSelectedTextFormats((selectedFormats) => ({
-        ...selectedFormats,
-        spoiler: false,
-      }));
-
-      return;
-    }
-
-    const text = getSelectedText();
-    document.execCommand(
-      'insertHTML', false, `<span class="spoiler" data-entity-type="${ApiMessageEntityTypes.Spoiler}">${text}</span>`,
-    );
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const spoiler = `||${value?.slice(selection.start, selection.end)}||`;
+    setSelection({
+      start: selection.start + 2,
+      end: selection.end + 2,
+    });
+    setText(`${value?.slice(0, selection.start)}${spoiler}${value?.slice(selection.end, value?.length)}`);
     onClose();
   });
 
   const handleBoldText = useLastCallback(() => {
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const bold = `**${value?.slice(selection.start, selection.end)}**`;
+    setSelection({
+      start: selection.start + 2,
+      end: selection.end + 2,
+    });
+    setText(`${value?.slice(0, selection.start)}${bold}${value?.slice(selection.end, value?.length)}`);
     setSelectedTextFormats((selectedFormats) => {
-      // Somehow re-applying 'bold' command to already bold text doesn't work
-      document.execCommand(selectedFormats.bold ? 'removeFormat' : 'bold');
-      Object.keys(selectedFormats).forEach((key) => {
-        if ((key === 'italic' || key === 'underline') && Boolean(selectedFormats[key])) {
-          document.execCommand(key);
-        }
-      });
-
-      updateSelectedRange();
       return {
         ...selectedFormats,
         bold: !selectedFormats.bold,
@@ -1985,8 +1883,14 @@ const TextFormatter: FC<TextFormatterProps> = ({
   });
 
   const handleItalicText = useLastCallback(() => {
-    document.execCommand('italic');
-    updateSelectedRange();
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const italic = `*${value?.slice(selection.start, selection.end)}*`;
+    setSelection({
+      start: selection.start + 2,
+      end: selection.end + 2,
+    });
+    setText(`${value?.slice(0, selection.start)}${italic}${value?.slice(selection.end, value?.length)}`);
     setSelectedTextFormats((selectedFormats) => ({
       ...selectedFormats,
       italic: !selectedFormats.italic,
@@ -1994,8 +1898,14 @@ const TextFormatter: FC<TextFormatterProps> = ({
   });
 
   const handleUnderlineText = useLastCallback(() => {
-    document.execCommand('underline');
-    updateSelectedRange();
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const underline = `__${value?.slice(selection.start, selection.end)}__`;
+    setSelection({
+      start: selection.start + 2,
+      end: selection.end + 2,
+    });
+    setText(`${value?.slice(0, selection.start)}${underline}${value?.slice(selection.end, value?.length)}`);
     setSelectedTextFormats((selectedFormats) => ({
       ...selectedFormats,
       underline: !selectedFormats.underline,
@@ -2003,80 +1913,46 @@ const TextFormatter: FC<TextFormatterProps> = ({
   });
 
   const handleStrikethroughText = useLastCallback(() => {
-    if (selectedTextFormats.strikethrough) {
-      const element = getSelectedElement();
-      if (
-        !selectedRange
-        || !element
-        || element.tagName !== 'DEL'
-        || !element.textContent
-      ) {
-        return;
-      }
-
-      element.replaceWith(element.textContent);
-      setSelectedTextFormats((selectedFormats) => ({
-        ...selectedFormats,
-        strikethrough: false,
-      }));
-
-      return;
-    }
-
-    const text = getSelectedText();
-    document.execCommand('insertHTML', false, `<del>${text}</del>`);
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const strikethrough = `~~${value?.slice(selection.start, selection.end)}~~`;
+    setSelection({
+      start: selection.start + 2,
+      end: selection.end + 2,
+    });
+    setText(`${value?.slice(0, selection.start)}${strikethrough}${value?.slice(selection.end, value?.length)}`);
+    setSelectedTextFormats((selectedFormats) => ({
+      ...selectedFormats,
+      strikethrough: false,
+    }));
     onClose();
   });
 
   const handleMonospaceText = useLastCallback(() => {
-    if (selectedTextFormats.monospace) {
-      const element = getSelectedElement();
-      if (
-        !selectedRange
-        || !element
-        || element.tagName !== 'CODE'
-        || !element.textContent
-      ) {
-        return;
-      }
-
-      element.replaceWith(element.textContent);
-      setSelectedTextFormats((selectedFormats) => ({
-        ...selectedFormats,
-        monospace: false,
-      }));
-
-      return;
-    }
-
-    const text = getSelectedText(true);
-    document.execCommand('insertHTML', false, `<code class="text-entity-code" dir="auto">${text}</code>`);
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const mono = `\`${value?.slice(selection.start, selection.end)}\``;
+    setSelection({
+      start: selection.start + 1,
+      end: selection.end + 1,
+    });
+    setText(`${value?.slice(0, selection.start)}${mono}${value?.slice(selection.end, value?.length)}`);
+    setSelectedTextFormats((selectedFormats) => ({
+      ...selectedFormats,
+      monospace: false,
+    }));
     onClose();
   });
 
   const handleLinkUrlConfirm = useLastCallback(() => {
-    const formattedLinkUrl = (ensureProtocol(linkUrl) || '').split('%').map(encodeURI).join('%');
-
-    if (isEditingLink) {
-      const element = getSelectedElement();
-      if (!element || element.tagName !== 'A') {
-        return;
-      }
-
-      (element as HTMLAnchorElement).href = formattedLinkUrl;
-
-      onClose();
-
-      return;
-    }
-
-    const text = getSelectedText(true);
-    restoreSelection();
-    document.execCommand(
-      'insertHTML',
-      false,
-      `<a href=${formattedLinkUrl} class="text-entity-link" dir="auto">${text}</a>`,
-    );
+    if (selection.start === selection.end) return;
+    const value = getText();
+    const mono = `[${value?.slice(selection.start, selection.end)}](${linkUrl})`;
+    setSelection({
+      start: selection.start + 1,
+      end: selection.end + 1,
+    });
+    setText(`${value?.slice(0, selection.start)}${mono}${value?.slice(selection.end, value?.length)}`);
     onClose();
   });
 
@@ -2227,7 +2103,6 @@ const TextFormatter: FC<TextFormatterProps> = ({
               inputMode="url"
               dir="auto"
               onChange={handleLinkUrlChange}
-              onScroll={updateInputStyles}
             />
           </div>
 
@@ -2489,6 +2364,11 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     closeTextFormatter();
     clearSelection();
   });
+  const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
+  const selectionRef = useRef<Selection>(selection);
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
 
   function checkSelection() {
     // Disable the formatter on iOS devices for now.
@@ -2496,29 +2376,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
       return false;
     }
 
-    const selection = window.getSelection();
-    if (!selection || !selection.rangeCount || isContextMenuOpenRef.current) {
-      closeTextFormatter();
-      if (IS_ANDROID) {
-        setIsTextFormatterDisabled(false);
-      }
-      return false;
-    }
-
-    const selectionRange = selection.getRangeAt(0);
-    const selectedText = selectionRange.toString().trim();
-    if (
-      shouldSuppressTextFormatter
-      || !isSelectionInsideInput(selectionRange, editableInputId || EDITABLE_INPUT_ID)
-      || !selectedText
-      || parseEmojiOnlyString(selectedText)
-      || !selectionRange.START_TO_END
-    ) {
-      closeTextFormatter();
-      return false;
-    }
-
-    return true;
+    return selectionRef.current.start !== selectionRef.current.end;
   }
 
   function processSelection() {
@@ -2530,24 +2388,26 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
       return;
     }
 
-    const selectionRange = window.getSelection()!.getRangeAt(0);
-    const selectionRect = selectionRange.getBoundingClientRect();
-    const scrollerRect = inputRef.current!.closest<HTMLDivElement>(`.${SCROLLER_CLASS}`)!.getBoundingClientRect();
+    // const selectionRange = window.getSelection()!.getRangeAt(0);
+    // const selectionRect = selectionRange.getBoundingClientRect();
+    // const scrollerRect = inputRef.current!.closest<HTMLDivElement>(`.${SCROLLER_CLASS}`)!.getBoundingClientRect();
 
-    let x = (selectionRect.left + selectionRect.width / 2) - scrollerRect.left;
+    // const x = (selectionRect.left + selectionRect.width / 2) - scrollerRect.left;
 
-    if (x < TEXT_FORMATTER_SAFE_AREA_PX) {
-      x = TEXT_FORMATTER_SAFE_AREA_PX;
-    } else if (x > scrollerRect.width - TEXT_FORMATTER_SAFE_AREA_PX) {
-      x = scrollerRect.width - TEXT_FORMATTER_SAFE_AREA_PX;
-    }
+    // if (x < TEXT_FORMATTER_SAFE_AREA_PX) {
+    //   x = TEXT_FORMATTER_SAFE_AREA_PX;
+    // } else if (x > scrollerRect.width - TEXT_FORMATTER_SAFE_AREA_PX) {
+    //   x = scrollerRect.width - TEXT_FORMATTER_SAFE_AREA_PX;
+    // }
 
     setTextFormatterAnchorPosition({
-      x,
-      y: selectionRect.top - scrollerRect.top,
+      // x,
+      // y: scrollerRect.top,
+      x: 0,
+      y: 0,
     });
 
-    setSelectedRange(selectionRange);
+    // setSelectedRange(selectionRange);
     openTextFormatter();
   }
 
@@ -2559,14 +2419,21 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     selectionTimeoutRef.current = window.setTimeout(processSelection, SELECTION_RECALCULATE_DELAY_MS);
   }
 
-  // function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-  //   if (e.button !== 2) {
-  //     const listenerEl = e.currentTarget.closest(`.${INPUT_WRAPPER_CLASS}`) || e.target;
-  //
-  //     listenerEl.addEventListener('mouseup', processSelectionWithTimeout, { once: true });
-  //     return;
-  //   }
-  //
+  useLayoutEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.position = 'absolute';
+      textareaRef.current.style.top = '-80px';
+    }
+  }, []);
+
+  function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+    if (e.button !== 2) {
+      const listenerEl = e.currentTarget.closest('.message-input-wrapper') || e.target;
+
+      listenerEl.addEventListener('mouseup', processSelectionWithTimeout, { once: true });
+    }
+  }
+
   //   if (isContextMenuOpenRef.current) {
   //     return;
   //   }
@@ -2792,7 +2659,9 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
             // onClick={focusInput}
             // onChange={handleChange}
             onKeyDown={handleKeyDown}
-            // onMouseDown={handleMouseDown}
+            onMouseDown={handleMouseDown}
+            setSelection={setSelection}
+            selection={selection}
             // onContextMenu={IS_ANDROID ? handleAndroidContextMenu : undefined}
             // onTouchCancel={IS_ANDROID ? processSelectionWithTimeout : undefined}
             aria-label={placeholder}
@@ -2842,9 +2711,12 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
         </div>
       )}
       <TextFormatter
+        setText={onUpdate}
+        getText={getHtml}
+        setSelection={setSelection}
+        selection={selection}
         isOpen={isTextFormatterOpen}
         anchorPosition={textFormatterAnchorPosition}
-        selectedRange={selectedRange}
         setSelectedRange={setSelectedRange}
         onClose={handleCloseTextFormatter}
       />
