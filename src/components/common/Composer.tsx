@@ -56,7 +56,7 @@ import {
 
 import {
   BASE_EMOJI_KEYWORD_LANG,
-  DEFAULT_MAX_MESSAGE_LENGTH,
+  DEFAULT_MAX_MESSAGE_LENGTH, DRAFT_DEBOUNCE,
   EDITABLE_INPUT_ID, EDITABLE_INPUT_MODAL_ID, EDITABLE_STORY_INPUT_ID,
   HEART_REACTION,
   MAX_UPLOAD_FILEPART_SIZE,
@@ -160,16 +160,19 @@ import useGetSelectionRange from '../../hooks/useGetSelectionRange';
 import useLastCallback from '../../hooks/useLastCallback';
 import useOldLang from '../../hooks/useOldLang';
 import usePreviousDeprecated from '../../hooks/usePreviousDeprecated';
+import useRunDebounced from '../../hooks/useRunDebounced';
 import useSchedule from '../../hooks/useSchedule';
 import useSendMessageAction from '../../hooks/useSendMessageAction';
 import useShowTransitionDeprecated from '../../hooks/useShowTransitionDeprecated';
 import { useStateRef } from '../../hooks/useStateRef';
 import useSyncEffect from '../../hooks/useSyncEffect';
+import useLayoutEffectWithPrevDeps from '../../hooks/useSyncEffectWithPrevDeps';
 import useVirtualBackdrop from '../../hooks/useVirtualBackdrop';
+import useBackgroundMode from '../../hooks/window/useBackgroundMode';
+import useBeforeUnload from '../../hooks/window/useBeforeUnload';
 import useAttachmentModal from '../middle/composer/hooks/useAttachmentModal';
 import useChatCommandTooltip from '../middle/composer/hooks/useChatCommandTooltip';
 import useCustomEmojiTooltip from '../middle/composer/hooks/useCustomEmojiTooltip';
-import useDraft from '../middle/composer/hooks/useDraft';
 import useEditing from '../middle/composer/hooks/useEditing';
 import useEmojiTooltip from '../middle/composer/hooks/useEmojiTooltip';
 import useInlineBotTooltip from '../middle/composer/hooks/useInlineBotTooltip';
@@ -421,6 +424,209 @@ interface Token {
   children?: Token[];
 }
 
+function astToMarkup(ast: ASTNode): string {
+  function processNode(node: ASTNode): string {
+    switch (node.type) {
+      case 'root':
+        return node.children?.map(processNode).join('') || '';
+
+      case 'text':
+        return node.value || '';
+
+      case ApiMessageEntityTypes.Pre: {
+        const language = node.language ? `${node.language}\n` : '';
+        return `\`\`\`${language}${node.value || ''}\`\`\``;
+      }
+
+      case ApiMessageEntityTypes.Blockquote: {
+        const content = node.children?.map(processNode).join('') || '';
+        return `\`\`\`q ${content}\`\`\``;
+      }
+
+      case ApiMessageEntityTypes.Code: {
+        const content = node.value || '';
+        // Не оборачиваем в маркеры, если контент пустой или содержит перенос строки
+        if (!content || content.includes('\n')) {
+          return content;
+        }
+        return `${MARKUP_SYMBOLS[node.type]}${content}${MARKUP_SYMBOLS[node.type]}`;
+      }
+
+      case ApiMessageEntityTypes.TextUrl: {
+        return `[${node.value || ''}](${node.url || ''})`;
+      }
+
+      case ApiMessageEntityTypes.CustomEmoji: {
+        return `![${node.value || ''}](${node.url || ''})`;
+      }
+
+      case ApiMessageEntityTypes.Mention: {
+        return node.value || '';
+      }
+
+      case ApiMessageEntityTypes.Bold:
+      case ApiMessageEntityTypes.Italic:
+      case ApiMessageEntityTypes.Strike:
+      case ApiMessageEntityTypes.Underline:
+      case ApiMessageEntityTypes.Spoiler: {
+        const content = node.children?.map(processNode).join('') || '';
+        // Не оборачиваем в маркеры, если контент пустой или состоит только из пробелов
+        if (!content || !content.trim()) {
+          return content;
+        }
+        const symbol = MARKUP_SYMBOLS[node.type];
+        return `${symbol}${content}${symbol}`;
+      }
+
+      default:
+        return '';
+    }
+  }
+
+  return processNode(ast);
+}
+
+function parseFormattedTextAsAst(formattedText: ApiFormattedText): ASTNode {
+  const { text, entities = [] } = formattedText || {};
+
+  if (!text) {
+    return { type: 'root', children: [] };
+  }
+
+  if (!entities.length) {
+    return {
+      type: 'root',
+      children: [{
+        type: 'text',
+        value: text,
+      }],
+    };
+  }
+
+  const sortedEntities = [...entities].sort((a, b) => {
+    if (a.offset !== b.offset) {
+      return a.offset - b.offset;
+    }
+    return b.length - a.length;
+  });
+
+  const root: ASTNode = {
+    type: 'root',
+    children: [],
+  };
+
+  let currentPosition = 0;
+
+  function createTextNode(content: string): ASTNode {
+    return {
+      type: 'text',
+      value: content,
+    };
+  }
+
+  while (currentPosition < text.length) {
+    // Находим все entities, которые начинаются в текущей позиции
+    // eslint-disable-next-line @typescript-eslint/no-loop-func
+    const currentEntities = sortedEntities.filter((e) => e.offset === currentPosition);
+
+    if (currentEntities.length > 0) {
+      const entity = currentEntities[0];
+      const content = text.slice(entity.offset, entity.offset + entity.length);
+
+      let node: ASTNode;
+
+      switch (entity.type) {
+        case ApiMessageEntityTypes.Pre: {
+          node = {
+            type: entity.type,
+            value: content,
+            language: entity.language,
+          };
+          break;
+        }
+
+        case ApiMessageEntityTypes.Code: {
+          node = {
+            type: ApiMessageEntityTypes.Code,
+            value: content,
+          };
+          break;
+        }
+
+        case ApiMessageEntityTypes.TextUrl: {
+          node = {
+            type: entity.type,
+            value: content,
+            url: entity.url,
+          };
+          break;
+        }
+
+        case ApiMessageEntityTypes.CustomEmoji: {
+          node = {
+            type: entity.type,
+            value: content,
+            documentId: entity.documentId,
+          };
+          break;
+        }
+
+        case ApiMessageEntityTypes.Mention: {
+          node = {
+            type: ApiMessageEntityTypes.Mention,
+            value: content,
+          };
+          break;
+        }
+
+        case ApiMessageEntityTypes.Bold:
+        case ApiMessageEntityTypes.Italic:
+        case ApiMessageEntityTypes.Strike:
+        case ApiMessageEntityTypes.Underline:
+        case ApiMessageEntityTypes.Spoiler:
+        case ApiMessageEntityTypes.Blockquote: {
+          // Для этих типов нужно рекурсивно обработать содержимое
+          const innerFormattedText: ApiFormattedText = {
+            text: content,
+            entities: sortedEntities
+              .filter((e) => e !== entity
+                && e.offset >= entity.offset
+                && e.offset + e.length <= entity.offset + entity.length)
+              .map((e) => ({
+                ...e,
+                offset: e.offset - entity.offset,
+              })),
+          };
+
+          node = {
+            type: entity.type as ApiMessageEntityTypes,
+            children: parseFormattedTextAsAst(innerFormattedText).children,
+          };
+          break;
+        }
+
+        default:
+          node = createTextNode(content);
+      }
+
+      root.children!.push(node);
+      currentPosition += entity.length;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-loop-func
+      const nextEntityOffset = sortedEntities.find((e) => e.offset > currentPosition)?.offset ?? text.length;
+      const content = text.slice(currentPosition, nextEntityOffset);
+
+      if (content) {
+        root.children!.push(createTextNode(content));
+      }
+
+      currentPosition = nextEntityOffset;
+    }
+  }
+
+  return root;
+}
+
 function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
   let text = '';
   const entities: ApiMessageEntity[] = [];
@@ -500,7 +706,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            url: node.url,
+            url: node.url!,
           });
         }
         break;
@@ -514,7 +720,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            documentId: node.documentId,
+            documentId: node.documentId!,
           });
         }
         break;
@@ -1152,6 +1358,9 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
     const handleSelectionChange = () => {
       if (document.activeElement === textarea) {
+        Object.assign(caretRef.current!.style, {
+          display: 'block',
+        });
         setSelection({
           start: textarea.selectionStart || 0,
           end: textarea.selectionEnd || 0,
@@ -1365,6 +1574,15 @@ const TextEditor: React.FC<TextEditorProps> = ({
   }, [onFocus]);
 
   useEffect(() => {
+    if (getText() && !textareaRef?.current?.value) {
+      setSelection({
+        start: getText().length,
+        end: getText().length,
+      });
+    }
+  }, [getText]);
+
+  useLayoutEffect(() => {
     if (!contentRef.current || !caretRef.current || !textareaRef?.current) return;
 
     const ast = parseMarkup(getText());
@@ -1410,6 +1628,152 @@ const TextEditor: React.FC<TextEditorProps> = ({
     </>
   );
 };
+
+let isFrozen = false;
+
+function freeze() {
+  isFrozen = true;
+
+  requestMeasure(() => {
+    isFrozen = false;
+  });
+}
+
+const useDraft = ({
+  draft,
+  chatId,
+  threadId,
+  getHtml,
+  setHtml,
+  editedMessage,
+  isDisabled,
+} : {
+  draft?: ApiDraft;
+  chatId: string;
+  threadId: ThreadId;
+  getHtml: Signal<string>;
+  setHtml: (html: string) => void;
+  editedMessage?: ApiMessage;
+  isDisabled?: boolean;
+}) => {
+  const { saveDraft, clearDraft, loadCustomEmojis } = getActions();
+
+  const isTouchedRef = useRef(false);
+
+  useEffect(() => {
+    const html = getHtml();
+    const isLocalDraft = draft?.isLocal !== undefined;
+    if (html && astToMarkup(parseFormattedTextAsAst(draft?.text!)) === html && !isLocalDraft) {
+      isTouchedRef.current = false;
+    } else {
+      isTouchedRef.current = true;
+    }
+  }, [draft, getHtml]);
+
+  useEffect(() => {
+    isTouchedRef.current = false;
+  }, [chatId, threadId]);
+
+  const isEditing = Boolean(editedMessage);
+
+  const updateDraft = useLastCallback((prevState: { chatId?: string; threadId?: ThreadId } = {}) => {
+    if (isDisabled || isEditing || !isTouchedRef.current) return;
+
+    const html = getHtml();
+
+    if (html) {
+      requestMeasure(() => {
+        saveDraft({
+          chatId: prevState.chatId ?? chatId,
+          threadId: prevState.threadId ?? threadId,
+          text: parseAstAsFormattedText(parseMarkup(html)),
+        });
+      });
+    } else {
+      clearDraft({
+        chatId: prevState.chatId ?? chatId,
+        threadId: prevState.threadId ?? threadId,
+        shouldKeepReply: true,
+      });
+    }
+  });
+
+  const runDebouncedForSaveDraft = useRunDebounced(DRAFT_DEBOUNCE, true, undefined, [chatId, threadId]);
+
+  // Restore draft on chat change
+  useEffectWithPrevDeps(([prevChatId, prevThreadId, prevDraft]) => {
+    console.log(isDisabled, isTouchedRef.current);
+    if (isDisabled) {
+      return;
+    }
+    const isTouched = isTouchedRef.current;
+
+    if (chatId === prevChatId && threadId === prevThreadId) {
+      if (isTouched && !draft) return; // Prevent reset from other client if we have local edits
+      if (!draft && prevDraft) {
+        console.log('here213');
+        setHtml('');
+      }
+
+      if (isTouched) return;
+    }
+
+    if (editedMessage || !draft) {
+      return;
+    }
+
+    console.log(astToMarkup(parseFormattedTextAsAst(draft?.text!)));
+
+    setHtml(astToMarkup(parseFormattedTextAsAst(draft?.text!)));
+
+    const customEmojiIds = draft.text?.entities
+      ?.map((entity) => entity.type === ApiMessageEntityTypes.CustomEmoji && entity.documentId)
+      .filter(Boolean) || [];
+    if (customEmojiIds.length) loadCustomEmojis({ ids: customEmojiIds });
+  }, [chatId, threadId, draft, getHtml, setHtml, editedMessage, isDisabled]);
+
+  // Save draft on chat change. Should be layout effect to read correct html on cleanup
+  useLayoutEffect(() => {
+    if (isDisabled) {
+      return undefined;
+    }
+
+    return () => {
+      if (!isEditing) {
+        updateDraft({ chatId, threadId });
+      }
+
+      freeze();
+    };
+  }, [chatId, threadId, isEditing, updateDraft, isDisabled]);
+
+  const chatIdRef = useStateRef(chatId);
+  const threadIdRef = useStateRef(threadId);
+  useEffect(() => {
+    if (isDisabled || isFrozen) {
+      return;
+    }
+
+    if (!getHtml()) {
+      updateDraft();
+
+      return;
+    }
+
+    const scopedСhatId = chatIdRef.current;
+    const scopedThreadId = threadIdRef.current;
+
+    runDebouncedForSaveDraft(() => {
+      if (chatIdRef.current === scopedСhatId && threadIdRef.current === scopedThreadId) {
+        updateDraft();
+      }
+    });
+  }, [chatIdRef, getHtml, isDisabled, runDebouncedForSaveDraft, threadIdRef, updateDraft]);
+
+  useBackgroundMode(updateDraft);
+  useBeforeUnload(updateDraft);
+};
+
 const INPUT_CUSTOM_EMOJI_SELECTOR = 'img[data-document-id]';
 
 export type TextFormatterProps = {
@@ -3691,6 +4055,7 @@ const Composer: FC<OwnProps & StateProps> = ({
   useEffect(() => {
     if (!isComposerBlocked) return;
 
+    console.log('232131');
     setHtml('');
   }, [isComposerBlocked, setHtml, attachments]);
 
