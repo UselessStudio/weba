@@ -133,7 +133,7 @@ import { getServerTime } from '../../util/serverTime';
 import stopEvent from '../../util/stopEvent';
 import {
   IS_ANDROID,
-  IS_EMOJI_SUPPORTED,
+  // IS_EMOJI_SUPPORTED,
   IS_IOS,
   IS_TOUCH_ENV,
   IS_VOICE_RECORDING_SUPPORTED,
@@ -378,7 +378,7 @@ interface TextEditorProps {
   inputRef?: React.RefObject<HTMLTextAreaElement>;
   id?: string;
   className?: string;
-  onKeyDown?: React.KeyboardEventHandler
+  onKeyDown?: React.KeyboardEventHandler;
   ariaLabel?: string;
   onFocus?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
   onBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
@@ -516,7 +516,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            url: node.url,
+            url: node.url!,
           });
         }
         break;
@@ -1899,13 +1899,13 @@ const TextFormatter: FC<TextFormatterProps> = ({
   );
 };
 
-const CONTEXT_MENU_CLOSE_DELAY_MS = 100;
+// const CONTEXT_MENU_CLOSE_DELAY_MS = 100;
 // Focus slows down animation, also it breaks transition layout in Chrome
 const FOCUS_DELAY_MS = 350;
 const TRANSITION_DURATION_FACTOR = 50;
 
 const SCROLLER_CLASS = 'input-scroller';
-const INPUT_WRAPPER_CLASS = 'message-input-wrapper';
+// const INPUT_WRAPPER_CLASS = 'message-input-wrapper';
 
 type MessageInputOwnProps = {
   ref?: RefObject<HTMLTextAreaElement>;
@@ -1952,7 +1952,7 @@ const TAB_INDEX_PRIORITY_TIMEOUT = 2000;
 const SELECTION_RECALCULATE_DELAY_MS = 260;
 const TEXT_FORMATTER_SAFE_AREA_PX = 140;
 // For some reason Safari inserts `<br>` after user removes text from input
-const SAFARI_BR = '<br>';
+// const SAFARI_BR = '<br>';
 const IGNORE_KEYS = [
   'Esc', 'Escape', 'Enter', 'PageUp', 'PageDown', 'Meta', 'Alt', 'Ctrl', 'ArrowDown', 'ArrowUp', 'Control', 'Shift',
 ];
@@ -2050,7 +2050,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
 
   useInputCustomEmojis(
     getHtml,
-    inputRef,
+    inputRef as unknown as RefObject<HTMLDivElement>,
     sharedCanvasRef,
     sharedCanvasHqRef,
     absoluteContainerRef,
@@ -3039,7 +3039,7 @@ const Composer: FC<OwnProps & StateProps> = ({
     getHtml,
     setHtml,
     getSelectionRange,
-    inputRef as RefObject<HTMLDivElement>,
+    inputRef as unknown as RefObject<HTMLDivElement>,
     groupChatMembers,
     topInlineBotIds,
     currentUserId,
@@ -4193,7 +4193,7 @@ const Composer: FC<OwnProps & StateProps> = ({
             />
           )}
           <LocalMessageInput
-            ref={inputRef}
+            ref={inputRef as unknown as RefObject<HTMLTextAreaElement>}
             id={inputId}
             editableInputId={editableInputId}
             customEmojiPrefix={type}
