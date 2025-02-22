@@ -1819,7 +1819,6 @@ const TextFormatter: FC<TextFormatterProps> = ({
       linkUrlInputRef.current!.focus();
     } else {
       setLinkUrl('');
-      setIsEditingLink(false);
     }
   }, [isLinkControlOpen]);
 
