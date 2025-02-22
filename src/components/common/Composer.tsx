@@ -422,32 +422,6 @@ interface Token {
 }
 
 function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
-  // Сначала обрабатываем AST, удаляя лишние пробелы
-  function trimAst(node: ASTNode): ASTNode {
-    if (node.type === 'text') {
-      return {
-        ...node,
-        value: node.value?.trim(),
-      };
-    }
-
-    if (node.children) {
-      // Фильтруем пустые текстовые узлы и применяем trim к остальным
-      const trimmedChildren = node.children
-        .map(trimAst)
-        .filter((child) => child.type !== 'text' || (child.value && child.value.trim()));
-
-      return {
-        ...node,
-        children: trimmedChildren,
-      };
-    }
-
-    return node;
-  }
-
-  const trimmedAst = trimAst(ast);
-
   let text = '';
   const entities: ApiMessageEntity[] = [];
 
@@ -467,12 +441,13 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
       case ApiMessageEntityTypes.Pre: {
         const value = node.value || '';
-        text += value;
-        if (value) {
+        const trimmedValue = value.replace(/^\n/, '').replace(/\n$/, '');
+        text += trimmedValue;
+        if (trimmedValue) {
           entities.push({
             type: node.type,
             offset: startPosition,
-            length: value.length,
+            length: trimmedValue.length,
             language: node.language,
           });
         }
@@ -481,15 +456,22 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
       case ApiMessageEntityTypes.Blockquote: {
         const blockStart = text.length;
-        node.children?.forEach((child) => {
-          processNode(child);
-        });
-        const length = text.length - blockStart;
-        if (length > 0) {
+        let innerContent = '';
+        const collectInnerText = (n: ASTNode) => {
+          if (n.type === 'text') {
+            innerContent += n.value || '';
+          }
+          n.children?.forEach(collectInnerText);
+        };
+        node.children?.forEach(collectInnerText);
+
+        const trimmedContent = innerContent.replace(/^\n/, '').replace(/\n$/, '');
+        if (trimmedContent) {
+          text += trimmedContent;
           entities.push({
             type: node.type,
             offset: blockStart,
-            length,
+            length: trimmedContent.length,
           });
         }
         break;
@@ -497,8 +479,10 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
       case ApiMessageEntityTypes.Code: {
         const value = node.value || '';
-        text += value;
-        if (value) {
+        if (!value || !value.trim()) {
+          text += value;
+        } else {
+          text += value;
           entities.push({
             type: node.type,
             offset: startPosition,
@@ -516,7 +500,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            url: node.url!,
+            url: node.url,
           });
         }
         break;
@@ -530,7 +514,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            documentId: node.documentId!,
+            documentId: node.documentId,
           });
         }
         break;
@@ -554,17 +538,44 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
       case ApiMessageEntityTypes.Strike:
       case ApiMessageEntityTypes.Underline:
       case ApiMessageEntityTypes.Spoiler: {
-        const formatStart = text.length;
-        node.children?.forEach((child) => {
-          processNode(child);
-        });
-        const length = text.length - formatStart;
-        if (length > 0) {
-          entities.push({
-            type: node.type,
-            offset: formatStart,
-            length,
-          });
+        let formattedText = '';
+        const collectInnerText = (n: ASTNode) => {
+          if (n.type === 'text') {
+            formattedText += n.value || '';
+          }
+          n.children?.forEach(collectInnerText);
+        };
+        node.children?.forEach(collectInnerText);
+
+        if (!formattedText || !formattedText.trim()) {
+          text += formattedText;
+        } else {
+          const isFirst = text.length === 0;
+          // eslint-disable-next-line max-len
+          const isLast = !ast.children?.slice(startPosition + 1).some((n) => n.type !== 'text' || (n.value && n.value.trim()));
+
+          const leftTrimmed = isFirst ? formattedText.trimStart() : formattedText;
+          const rightTrimmed = isLast ? leftTrimmed.trimEnd() : leftTrimmed;
+
+          const startTrim = formattedText.length - leftTrimmed.length;
+          const endTrim = leftTrimmed.length - rightTrimmed.length;
+
+          text += formattedText.slice(0, startTrim);
+
+          const entityStart = text.length;
+          text += rightTrimmed;
+
+          if (rightTrimmed) {
+            entities.push({
+              type: node.type,
+              offset: entityStart,
+              length: rightTrimmed.length,
+            });
+          }
+
+          if (endTrim > 0) {
+            text += formattedText.slice(formattedText.length - endTrim);
+          }
         }
         break;
       }
@@ -573,9 +584,8 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
     return startPosition;
   }
 
-  processNode(trimmedAst);
+  processNode(ast);
 
-  // Sort entities by offset and handle nested entities
   entities.sort((a, b) => {
     if (a.offset !== b.offset) {
       return a.offset - b.offset;
@@ -583,8 +593,13 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
     return b.length - a.length;
   });
 
+  console.log({
+    text: text.trim(),
+    entities: entities.length > 0 ? entities : undefined,
+  });
+
   return {
-    text,
+    text: text.trim(),
     entities: entities.length > 0 ? entities : undefined,
   };
 }
@@ -1277,21 +1292,6 @@ const TextEditor: React.FC<TextEditorProps> = ({
     }, 0);
   };
 
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      if (document.activeElement !== textareaRef.current) {
-        setTimeout(() => {
-          textareaRef.current?.focus();
-        }, 0);
-      }
-    };
-
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-    };
-  }, []);
-
   const getCaretCoordinates = (): CaretCoordinates | null => {
     const position = textareaRef.current!.selectionStart;
 
@@ -1356,10 +1356,16 @@ const TextEditor: React.FC<TextEditorProps> = ({
   };
 
   const blurHandler = useCallback((event: React.FocusEvent<HTMLTextAreaElement, Element>) => {
+    Object.assign(caretRef.current!.style, {
+      display: 'none',
+    });
     onBlur?.(event);
   }, [onBlur]);
 
   const focusHandler = useCallback((event: React.FocusEvent<HTMLTextAreaElement, Element>) => {
+    Object.assign(caretRef.current!.style, {
+      display: 'block',
+    });
     onFocus?.(event);
   }, [onFocus]);
 
@@ -1375,8 +1381,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
       if (coords) {
         Object.assign(caretRef.current.style, {
           left: `${coords.left}px`,
-          top: `${coords.top}px`,
-          display: 'block',
+          top: `${coords.top}px`
         });
       }
     } else {
@@ -2121,11 +2126,10 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     }
   }, [getHtml, isActive, updateInputHeight]);
 
-  const textareaRef = useRef<HTMLTextAreaElement>();
   const chatIdRef = useRef(chatId);
   chatIdRef.current = chatId;
   const focusInput = useLastCallback(() => {
-    if (!textareaRef?.current || isNeedPremium) {
+    if (!inputRef?.current || isNeedPremium) {
       return;
     }
 
@@ -2134,7 +2138,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
       return;
     }
 
-    focusEditableElement(textareaRef.current!);
+    focusEditableElement(inputRef.current!);
   });
 
   const handleCloseTextFormatter = useLastCallback(() => {
@@ -2210,13 +2214,6 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     // Small delay to allow browser properly recalculate selection
     selectionTimeoutRef.current = window.setTimeout(processSelection, SELECTION_RECALCULATE_DELAY_MS);
   }
-
-  useLayoutEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.position = 'absolute';
-      textareaRef.current.style.top = '-80px';
-    }
-  }, []);
 
   // function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
   //   if (e.button !== 2) {
@@ -2336,6 +2333,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
       return;
     }
 
+    console.log(canAutoFocus);
     if (canAutoFocus) {
       focusInput();
     }
