@@ -1,10 +1,17 @@
-import {FC, getIsHeavyAnimating, type StateHookSetter, useLayoutEffect} from '../../lib/teact/teact';
+import type {
+  FC,
+  RefObject,
+  StateHookSetter,
+} from '../../lib/teact/teact';
 import React, {
-  memo, useMemo, useSignal, useState, useEffect, useRef, useCallback
+  getIsHeavyAnimating,
+  memo, useCallback,
+  useEffect, useLayoutEffect,
+  useMemo, useRef, useSignal, useState,
 } from '../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
-import {
+import type {
   ApiAttachment,
   ApiAttachMenuPeerType,
   ApiAvailableEffect,
@@ -16,9 +23,10 @@ import {
   ApiChat,
   ApiChatFullInfo,
   ApiDraft,
-  ApiFormattedText, type ApiInputMessageReplyInfo,
+  ApiFormattedText,
+  ApiInputMessageReplyInfo,
   ApiMessage,
-  ApiMessageEntity, ApiMessageEntityTypes,
+  ApiMessageEntity,
   ApiNewPoll,
   ApiQuickReply,
   ApiReaction,
@@ -40,12 +48,16 @@ import type {
   MessageListType,
   ThreadId,
 } from '../../types';
-import { MAIN_THREAD_ID } from '../../api/types';
+import type { Signal } from '../../util/signals';
+import {
+  ApiMessageEntityTypes,
+  MAIN_THREAD_ID,
+} from '../../api/types';
 
 import {
   BASE_EMOJI_KEYWORD_LANG,
-  DEFAULT_MAX_MESSAGE_LENGTH, EDITABLE_INPUT_CSS_SELECTOR,
-  EDITABLE_INPUT_MODAL_ID, EDITABLE_STORY_INPUT_ID,
+  DEFAULT_MAX_MESSAGE_LENGTH,
+  EDITABLE_INPUT_ID, EDITABLE_INPUT_MODAL_ID, EDITABLE_STORY_INPUT_ID,
   HEART_REACTION,
   MAX_UPLOAD_FILEPART_SIZE,
   ONE_TIME_MEDIA_TTL_SECONDS,
@@ -53,7 +65,9 @@ import {
   SEND_MESSAGE_ACTION_INTERVAL,
   SERVICE_NOTIFICATIONS_USER_ID,
 } from '../../config';
-import {requestForcedReflow, requestMeasure, requestMutation, requestNextMutation} from '../../lib/fasterdom/fasterdom';
+import {
+  requestForcedReflow, requestMeasure, requestMutation, requestNextMutation,
+} from '../../lib/fasterdom/fasterdom';
 import {
   canEditMedia, canReplaceMessageMedia, containsCustomEmoji,
   getAllowedAttachmentOptions,
@@ -99,27 +113,37 @@ import {
 } from '../../global/selectors';
 import { selectCurrentLimit } from '../../global/selectors/limits';
 import buildClassName from '../../util/buildClassName';
+import captureEscKeyListener from '../../util/captureEscKeyListener';
+import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { formatMediaDuration, formatVoiceRecordDuration } from '../../util/dates/dateFormat';
 import { processDeepLink } from '../../util/deeplink';
 import { tryParseDeepLink } from '../../util/deepLinkParser';
 import deleteLastCharacterOutsideSelection from '../../util/deleteLastCharacterOutsideSelection';
+import { getIsDirectTextInputDisabled } from '../../util/directInputManager';
 import { processMessageInputForCustomEmoji } from '../../util/emoji/customEmojiManager';
+import parseEmojiOnlyString from '../../util/emoji/parseEmojiOnlyString';
+import { ensureProtocol } from '../../util/ensureProtocol';
 import focusEditableElement from '../../util/focusEditableElement';
+import getKeyFromEvent from '../../util/getKeyFromEvent';
 import { MEMO_EMPTY_ARRAY } from '../../util/memo';
 import parseHtmlAsFormattedText from '../../util/parseHtmlAsFormattedText';
+import { debounce } from '../../util/schedulers';
 import { insertHtmlInSelection } from '../../util/selection';
 import { getServerTime } from '../../util/serverTime';
+import stopEvent from '../../util/stopEvent';
 import {
   IS_ANDROID,
   IS_EMOJI_SUPPORTED,
   IS_IOS,
   IS_TOUCH_ENV,
-  IS_VOICE_RECORDING_SUPPORTED
+  IS_VOICE_RECORDING_SUPPORTED,
 } from '../../util/windowEnvironment';
 import windowSize from '../../util/windowSize';
 import applyIosAutoCapitalizationFix from '../middle/composer/helpers/applyIosAutoCapitalizationFix';
 import buildAttachment, { prepareAttachmentsToSend } from '../middle/composer/helpers/buildAttachment';
+import { preparePastedHtml } from '../middle/composer/helpers/cleanHtml';
 import { buildCustomEmojiHtml } from '../middle/composer/helpers/customEmoji';
+import getFilesFromDataTransferItems from '../middle/composer/helpers/getFilesFromDataTransferItems';
 import { isSelectionInsideInput } from '../middle/composer/helpers/selection';
 import { getPeerColorClass } from './helpers/peerColor';
 import renderText from './helpers/renderText';
@@ -127,6 +151,7 @@ import { getTextWithEntitiesAsHtml } from './helpers/renderTextWithEntities';
 
 import useInterval from '../../hooks/schedulers/useInterval';
 import useTimeout from '../../hooks/schedulers/useTimeout';
+import useAppLayout from '../../hooks/useAppLayout';
 import useContextMenuHandlers from '../../hooks/useContextMenuHandlers';
 import useDerivedState from '../../hooks/useDerivedState';
 import useEffectWithPrevDeps from '../../hooks/useEffectWithPrevDeps';
@@ -140,6 +165,7 @@ import useSendMessageAction from '../../hooks/useSendMessageAction';
 import useShowTransitionDeprecated from '../../hooks/useShowTransitionDeprecated';
 import { useStateRef } from '../../hooks/useStateRef';
 import useSyncEffect from '../../hooks/useSyncEffect';
+import useVirtualBackdrop from '../../hooks/useVirtualBackdrop';
 import useAttachmentModal from '../middle/composer/hooks/useAttachmentModal';
 import useChatCommandTooltip from '../middle/composer/hooks/useChatCommandTooltip';
 import useCustomEmojiTooltip from '../middle/composer/hooks/useCustomEmojiTooltip';
@@ -147,6 +173,7 @@ import useDraft from '../middle/composer/hooks/useDraft';
 import useEditing from '../middle/composer/hooks/useEditing';
 import useEmojiTooltip from '../middle/composer/hooks/useEmojiTooltip';
 import useInlineBotTooltip from '../middle/composer/hooks/useInlineBotTooltip';
+import useInputCustomEmojis from '../middle/composer/hooks/useInputCustomEmojis';
 import useMentionTooltip from '../middle/composer/hooks/useMentionTooltip';
 import useStickerTooltip from '../middle/composer/hooks/useStickerTooltip';
 import useVoiceRecording from '../middle/composer/hooks/useVoiceRecording';
@@ -174,13 +201,13 @@ import ReactionSelector from '../middle/message/reactions/ReactionSelector';
 import Button from '../ui/Button';
 import ResponsiveHoverButton from '../ui/ResponsiveHoverButton';
 import Spinner from '../ui/Spinner';
+import TextTimer from '../ui/TextTimer';
 import Avatar from './Avatar';
 import Icon from './icons/Icon';
 import ReactionAnimatedEmoji from './reactions/ReactionAnimatedEmoji';
 
 import './Composer.scss';
-import type {ChangeEvent, EventHandler, RefObject} from "react";
-import type {Signal} from "../../util/signals";
+import '../middle/composer/TextFormatter.scss';
 
 type ComposerType = 'messageList' | 'story';
 
@@ -302,13 +329,6 @@ const SELECT_MODE_TRANSITION_MS = 200;
 const SENDING_ANIMATION_DURATION = 350;
 const MOUNT_ANIMATION_DURATION = 430;
 
-interface NodeEntry {
-  type: ApiMessageEntityTypes;
-  symbols: string;
-  hasChildren: boolean;
-  isBlock?: boolean;
-}
-
 interface Token {
   type: ApiMessageEntityTypes | 'text';
   value?: string;
@@ -340,7 +360,7 @@ const MARKUP_SYMBOLS = {
   [ApiMessageEntityTypes.Spoiler]: '||',
   [ApiMessageEntityTypes.TextUrl]: ['[', ']'],
   [ApiMessageEntityTypes.CustomEmoji]: ['![', ']'],
-  [ApiMessageEntityTypes.Mention]: '@'
+  [ApiMessageEntityTypes.Mention]: '@',
 } as const;
 
 const HTML_TAGS = {
@@ -351,19 +371,14 @@ const HTML_TAGS = {
   [ApiMessageEntityTypes.Code]: 'code',
   [ApiMessageEntityTypes.Pre]: 'pre',
   [ApiMessageEntityTypes.Blockquote]: 'blockquote',
-  [ApiMessageEntityTypes.Spoiler]: 'span'
+  [ApiMessageEntityTypes.Spoiler]: 'span',
 } as const;
 
 interface TextEditorProps {
   inputRef?: React.RefObject<HTMLTextAreaElement>;
   id?: string;
   className?: string;
-  contentEditable?: boolean;
-  onClick?: (event: React.MouseEvent<HTMLTextAreaElement>) => void;
-  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  onMouseDown?: (event: React.MouseEvent<HTMLTextAreaElement>) => void;
-  onContextMenu?: (event: React.MouseEvent<HTMLTextAreaElement>) => void;
-  onTouchCancel?: (event: React.TouchEvent<HTMLTextAreaElement>) => void;
+  onKeyDown?: React.KeyboardEventHandler
   ariaLabel?: string;
   onFocus?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
   onBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
@@ -382,14 +397,8 @@ interface CaretCoordinates {
   top: number;
 }
 
-interface NodeEntry {
-  type: string;
-  symbols: string;
-  hasChildren: boolean;
-}
-
 interface ASTNode {
-  type: string;
+  type: 'text' | 'root' | ApiMessageEntityTypes;
   value?: string;
   children?: ASTNode[];
   url?: string;
@@ -404,7 +413,7 @@ interface Marker {
 }
 
 interface Token {
-  type: string;
+  type: 'text' | ApiMessageEntityTypes;
   value?: string;
   symbol?: string;
   text?: string;
@@ -418,7 +427,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
     if (node.type === 'text') {
       return {
         ...node,
-        value: node.value?.trim()
+        value: node.value?.trim(),
       };
     }
 
@@ -426,11 +435,11 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
       // Фильтруем пустые текстовые узлы и применяем trim к остальным
       const trimmedChildren = node.children
         .map(trimAst)
-        .filter(child => child.type !== 'text' || (child.value && child.value.trim()));
+        .filter((child) => child.type !== 'text' || (child.value && child.value.trim()));
 
       return {
         ...node,
-        children: trimmedChildren
+        children: trimmedChildren,
       };
     }
 
@@ -447,7 +456,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
     switch (node.type) {
       case 'root':
-        node.children?.forEach(child => {
+        node.children?.forEach((child) => {
           processNode(child);
         });
         break;
@@ -464,7 +473,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            language: node.language
+            language: node.language,
           });
         }
         break;
@@ -472,7 +481,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
       case ApiMessageEntityTypes.Blockquote: {
         const blockStart = text.length;
-        node.children?.forEach(child => {
+        node.children?.forEach((child) => {
           processNode(child);
         });
         const length = text.length - blockStart;
@@ -480,7 +489,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
           entities.push({
             type: node.type,
             offset: blockStart,
-            length
+            length,
           });
         }
         break;
@@ -493,7 +502,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
           entities.push({
             type: node.type,
             offset: startPosition,
-            length: value.length
+            length: value.length,
           });
         }
         break;
@@ -507,7 +516,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            url: node.url
+            url: node.url,
           });
         }
         break;
@@ -521,7 +530,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
             type: node.type,
             offset: startPosition,
             length: value.length,
-            documentId: node.documentId
+            documentId: node.documentId!,
           });
         }
         break;
@@ -534,7 +543,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
           entities.push({
             type: node.type,
             offset: startPosition,
-            length: value.length
+            length: value.length,
           });
         }
         break;
@@ -546,7 +555,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
       case ApiMessageEntityTypes.Underline:
       case ApiMessageEntityTypes.Spoiler: {
         const formatStart = text.length;
-        node.children?.forEach(child => {
+        node.children?.forEach((child) => {
           processNode(child);
         });
         const length = text.length - formatStart;
@@ -554,7 +563,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
           entities.push({
             type: node.type,
             offset: formatStart,
-            length
+            length,
           });
         }
         break;
@@ -576,7 +585,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
   return {
     text,
-    entities: entities.length > 0 ? entities : undefined
+    entities: entities.length > 0 ? entities : undefined,
   };
 }
 
@@ -584,6 +593,7 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
   const tokens: Token[] = [];
   let pos = 0;
 
+  // eslint-disable-next-line @typescript-eslint/no-shadow
   function isEscaped(pos: number): boolean {
     let backslashCount = 0;
     let i = pos - 1;
@@ -595,18 +605,20 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
   }
 
   function findClosingSymbol(symbol: string, startPos: number): number {
-    let pos = startPos;
-    while (pos < input.length) {
-      if (input.startsWith(symbol, pos) && !isEscaped(pos)) {
-        return pos;
+    let newPos = startPos;
+    while (newPos < input.length) {
+      if (input.startsWith(symbol, newPos) && !isEscaped(newPos)) {
+        return newPos;
       }
-      pos++;
+      newPos++;
     }
     return -1;
   }
 
-  function handleBlockQuoteOrPre(): { token: Token; newPos: number } | null {
-    if (!input.startsWith('```', pos) || isEscaped(pos) || isNested) return null;
+  function handleBlockQuoteOrPre(): { token: Token; newPos: number } | undefined {
+    if (!input.startsWith('```', pos) || isEscaped(pos) || isNested) {
+      return undefined;
+    }
 
     let currentPos = pos + 3;
     let isQuote = false;
@@ -621,7 +633,9 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
     }
 
     const endPos = findClosingSymbol('```', currentPos);
-    if (endPos === -1) return null;
+    if (endPos === -1) {
+      return undefined;
+    }
 
     const content = input.slice(currentPos, endPos);
     const type = isQuote ? ApiMessageEntityTypes.Blockquote : ApiMessageEntityTypes.Pre;
@@ -632,83 +646,96 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
         value: type === ApiMessageEntityTypes.Pre ? content : undefined,
         children: type === ApiMessageEntityTypes.Blockquote ? tokenize(content, true) : undefined,
       },
-      newPos: endPos + 3
+      newPos: endPos + 3,
     };
   }
 
-  function handleInlineCode(): { token: Token; newPos: number } | null {
-    if (input[pos] !== '`' || isEscaped(pos)) return null;
+  function handleInlineCode(): { token: Token; newPos: number } | undefined {
+    if (input[pos] !== '`' || isEscaped(pos)) {
+      return undefined;
+    }
 
     const endPos = findClosingSymbol('`', pos + 1);
-    if (endPos === -1) return null;
+    if (endPos === -1) {
+      return undefined;
+    }
 
     const content = input.slice(pos + 1, endPos);
 
     // Don't parse if empty or contains newline
     if (content.length === 0 || content.includes('\n')) {
-      return null;
+      return undefined;
     }
 
     return {
       token: {
         type: ApiMessageEntityTypes.Code,
-        value: content
+        value: content,
       },
-      newPos: endPos + 1
+      newPos: endPos + 1,
     };
   }
 
-  function handleTextUrl(): { token: Token; newPos: number } | null {
+  function handleTextUrl(): { token: Token; newPos: number } | undefined {
     const isEmoji = input[pos] === '!' && input[pos + 1] === '[';
-    if ((!isEmoji && input[pos] !== '[') || isEscaped(pos)) return null;
-
+    if ((!isEmoji && input[pos] !== '[') || isEscaped(pos)) {
+      return undefined;
+    }
     const textStart = isEmoji ? pos + 2 : pos + 1;
     const textEnd = findClosingSymbol(']', textStart);
 
-    if (textEnd === -1) return null;
-    if (input[textEnd + 1] !== '(') return null;
+    if (textEnd === -1) {
+      return undefined;
+    }
+    if (input[textEnd + 1] !== '(') {
+      return undefined;
+    }
 
     const urlStart = textEnd + 2;
     const urlEnd = findClosingSymbol(')', urlStart);
 
-    if (urlEnd === -1) return null;
+    if (urlEnd === -1) {
+      return undefined;
+    }
 
     return {
       token: {
         type: isEmoji ? ApiMessageEntityTypes.CustomEmoji : ApiMessageEntityTypes.TextUrl,
         value: input.slice(textStart, textEnd),
-        url: input.slice(urlStart, urlEnd)
+        url: input.slice(urlStart, urlEnd),
       },
-      newPos: urlEnd + 1
+      newPos: urlEnd + 1,
     };
   }
 
-  function handleMention(): { token: Token; newPos: number } | null {
-    if (input[pos] !== '@' || isEscaped(pos)) return null;
+  function handleMention(): { token: Token; newPos: number } | undefined {
+    if (input[pos] !== '@' || isEscaped(pos)) return undefined;
 
     let end = pos + 1;
     while (end < input.length && /[a-zA-Z0-9_]/.test(input[end])) {
       end++;
     }
 
-    if (end === pos + 1) return null;
+    if (end === pos + 1) {
+      return undefined;
+    }
 
     return {
       token: {
         type: ApiMessageEntityTypes.Mention,
-        value: input.slice(pos + 1, end)
+        value: input.slice(pos + 1, end),
       },
-      newPos: end
+      newPos: end,
     };
   }
 
-  function handleFormatting(): { token: Token; newPos: number } | null {
+  function handleFormatting(): { token: Token; newPos: number } | undefined {
     const formatters = [
       { symbol: '**', type: ApiMessageEntityTypes.Bold },
       { symbol: '*', type: ApiMessageEntityTypes.Italic },
       { symbol: '~~', type: ApiMessageEntityTypes.Strike },
       { symbol: '__', type: ApiMessageEntityTypes.Underline },
-      { symbol: '||', type: ApiMessageEntityTypes.Spoiler }
+      { symbol: '||', type: ApiMessageEntityTypes.Spoiler },
     ];
 
     for (const { symbol, type } of formatters) {
@@ -723,13 +750,13 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
       return {
         token: {
           type,
-          children
+          children,
         },
-        newPos: endPos + symbol.length
+        newPos: endPos + symbol.length,
       };
     }
 
-    return null;
+    return undefined;
   }
 
   while (pos < input.length) {
@@ -785,7 +812,7 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
 
     tokens.push({
       type: 'text',
-      value: input.slice(pos, textEnd)
+      value: input.slice(pos, textEnd),
     });
     pos = textEnd;
   }
@@ -799,7 +826,7 @@ function parse(tokens: Token[]): ASTNode {
       type: token.type,
       value: token.value,
       language: token.language,
-      url: token.url
+      url: token.url,
     };
 
     if (token.children) {
@@ -811,7 +838,7 @@ function parse(tokens: Token[]): ASTNode {
 
   function mergeTextNodes(nodes: ASTNode[]): ASTNode[] {
     const result: ASTNode[] = [];
-    let currentTextNode: ASTNode | null = null;
+    let currentTextNode: ASTNode | undefined;
 
     for (const node of nodes) {
       if (node.type === 'text') {
@@ -822,7 +849,7 @@ function parse(tokens: Token[]): ASTNode {
           result.push(currentTextNode);
         }
       } else {
-        currentTextNode = null;
+        currentTextNode = undefined;
         if (node.children) {
           node.children = mergeTextNodes(node.children);
         }
@@ -838,7 +865,7 @@ function parse(tokens: Token[]): ASTNode {
 
   return {
     type: 'root',
-    children: mergedNodes
+    children: mergedNodes,
   };
 }
 
@@ -869,10 +896,12 @@ function renderAst(node: ASTNode, selection: Selection): string {
   };
 
   const processMarkupSymbols = (symbols: string, start: number): string => {
+    // eslint-disable-next-line @typescript-eslint/no-shadow
     let result = '';
     for (let i = 0; i < symbols.length; i++) {
       const currentPos = start + i;
       const isSelected = currentPos >= selection.start && currentPos < selection.end;
+      // eslint-disable-next-line max-len
       result += `<span class="markup-symbol${isSelected ? ' selected' : ''}" data-offset="${currentPos}">${symbols[i]}</span>`;
     }
     return result;
@@ -881,6 +910,7 @@ function renderAst(node: ASTNode, selection: Selection): string {
   const startNewLine = (virtualOffset: number) => {
     if (needNewLineStart) {
       const isSelected = virtualOffset >= selection.start && virtualOffset < selection.end;
+      // eslint-disable-next-line max-len
       currentLine = `<span class="newline-start${isSelected ? ' selected' : ''}" data-virtual-offset="${virtualOffset}"></span>`;
       needNewLineStart = false;
     }
@@ -894,6 +924,7 @@ function renderAst(node: ASTNode, selection: Selection): string {
     }
   };
 
+  // eslint-disable-next-line max-len
   const renderBlockContent = (content: string | undefined, children: ASTNode[] | undefined, tag: string, type: ApiMessageEntityTypes, language?: string) => {
     const blockAttrs = language
       ? `class="code-block" data-entity-type="${type}" data-language="${language}"`
@@ -917,17 +948,18 @@ function renderAst(node: ASTNode, selection: Selection): string {
       });
     } else if (children) {
       // For Blockquote - render children with markup
-      children.forEach(child => renderNode(child));
+      children.forEach((child) => renderNode(child));
       flushLine();
     }
 
     result.push(`</${tag}>`);
   };
 
-  const renderNode = (node: ASTNode): void => {
+  // eslint-disable-next-line @typescript-eslint/no-shadow
+  function renderNode(node: ASTNode): void {
     switch (node.type) {
       case 'root':
-        node.children?.forEach(child => renderNode(child));
+        node.children?.forEach((child) => renderNode(child));
         flushLine();
         break;
 
@@ -952,7 +984,7 @@ function renderAst(node: ASTNode, selection: Selection): string {
         flushLine();
         const language = node.language ? `[${node.language}]` : '';
 
-        currentLine += processMarkupSymbols('```' + language + '\n', currentPosition);
+        currentLine += processMarkupSymbols(`\`\`\`${language}\n`, currentPosition);
         currentPosition += 3 + language.length + 1;
         flushLine();
 
@@ -1006,7 +1038,7 @@ function renderAst(node: ASTNode, selection: Selection): string {
         currentPosition += symbol.length;
 
         currentLine += `<${tag}${className} data-entity-type="${node.type}">`;
-        node.children?.forEach(child => renderNode(child));
+        node.children?.forEach((child) => renderNode(child));
         currentLine += `</${tag}>`;
 
         currentLine += processMarkupSymbols(symbol, currentPosition);
@@ -1018,6 +1050,7 @@ function renderAst(node: ASTNode, selection: Selection): string {
         currentLine += processMarkupSymbols('[', currentPosition);
         currentPosition += 1;
 
+        // eslint-disable-next-line max-len
         currentLine += `<a href="${escapeHtml(node.url || '')}" target="_blank" rel="noopener noreferrer" data-entity-type="${node.type}">`;
         currentLine += processTextNode(node.value || '', currentPosition);
         currentPosition += (node.value || '').length;
@@ -1056,7 +1089,7 @@ function renderAst(node: ASTNode, selection: Selection): string {
         break;
       }
     }
-  };
+  }
 
   renderNode(node);
   flushLine();
@@ -1078,34 +1111,30 @@ function parseMarkup(text: string): ASTNode {
 }
 
 const TextEditor: React.FC<TextEditorProps> = ({
- inputRef,
- id,
- className,
- contentEditable = false,
- textRendererRef,
- onClick,
- onKeyDown,
- onMouseDown,
- onContextMenu,
- onTouchCancel,
- ariaLabel,
- onFocus,
- onBlur,
- setText,
- getText,
+  inputRef,
+  id,
+  className,
+  textRendererRef,
+  onKeyDown,
+  ariaLabel,
+  onFocus,
+  onBlur,
+  setText,
+  getText,
 }) => {
   const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
-  let contentRef = useRef<HTMLDivElement>(null);
-  let textareaRef = useRef<HTMLTextAreaElement>(null);
-  const caretRef = useRef<HTMLDivElement>(null);
+  let contentRef = useRef<HTMLDivElement>();
+  let textareaRef = useRef<HTMLTextAreaElement>();
+  const caretRef = useRef<HTMLDivElement>();
 
   if (textRendererRef) {
+    // @ts-ignore
     contentRef = textRendererRef as RefObject<HTMLDivElement | null>;
   }
   if (inputRef) {
+    // @ts-ignore
     textareaRef = inputRef;
   }
-
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -1115,7 +1144,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
       if (document.activeElement === textarea) {
         setSelection({
           start: textarea.selectionStart || 0,
-          end: textarea.selectionEnd || 0
+          end: textarea.selectionEnd || 0,
         });
       }
     };
@@ -1125,7 +1154,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
     textarea.addEventListener('keyup', handleSelectionChange);
     textarea.addEventListener('focus', handleSelectionChange);
 
-
+    // eslint-disable-next-line consistent-return
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
       textarea.removeEventListener('input', handleSelectionChange);
@@ -1134,15 +1163,31 @@ const TextEditor: React.FC<TextEditorProps> = ({
     };
   }, []);
 
-  useEffect(() => {
-    updateContent(getText());
-  }, [getText, selection]);
-
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setText(e.target.value);
   };
 
-  const handlePointerDown = (e: { clientX: number; clientY: number, target: HTMLElement, detail: number }) => {
+  const getPositionFromRange = (range: Range): number => {
+    const container = range.startContainer;
+    const offset = range.startOffset;
+
+    if (container.nodeType === Node.TEXT_NODE) {
+      const parentSpan = container.parentElement?.closest('span[data-offset]');
+      if (parentSpan) {
+        return Number(parentSpan.getAttribute('data-offset')!) + offset;
+      }
+    } else if (container.nodeType === Node.ELEMENT_NODE) {
+      const element = container as Element;
+      const span = element.closest('span[data-offset]');
+      if (span) {
+        return Number(span.getAttribute('data-offset')!) + (offset > 0 ? 1 : 0);
+      }
+    }
+
+    return 0;
+  };
+
+  const handlePointerDown = (e: { clientX: number; clientY: number; target: HTMLElement; detail: number }) => {
     if (!e.target) {
       textareaRef.current!.selectionStart = 0;
       textareaRef.current!.selectionEnd = 0;
@@ -1157,15 +1202,15 @@ const TextEditor: React.FC<TextEditorProps> = ({
       if (!line) return;
 
       const spans = Array.from(line.querySelectorAll('span[data-offset]'))
-        .filter(span => !span.classList.contains('newline-end'));
+        .filter((span) => !span.classList.contains('newline-end'));
 
       if (spans.length === 0) return;
 
       const firstSpan = spans[0];
       const lastSpan = spans[spans.length - 1];
 
-      const startPosition = +firstSpan.getAttribute('data-offset')!;
-      const endPosition = +lastSpan.getAttribute('data-offset')! + 1;
+      const startPosition = Number(firstSpan.getAttribute('data-offset')!);
+      const endPosition = Number(lastSpan.getAttribute('data-offset')!) + 1;
 
       textareaRef.current!.selectionStart = startPosition;
       textareaRef.current!.selectionEnd = endPosition;
@@ -1180,12 +1225,12 @@ const TextEditor: React.FC<TextEditorProps> = ({
     if (e.target.classList.contains('editor-line')) {
       const clickedLine = e.target as HTMLElement;
       const spans = Array.from(clickedLine.querySelectorAll('span[data-offset]'))
-        .filter(span => !span.classList.contains('newline-end') && !span.classList.contains('newline-start'));
+        .filter((span) => !span.classList.contains('newline-end') && !span.classList.contains('newline-start'));
 
       if (spans.length > 0) {
         // Если есть символы, ставим каретку после последнего
         const lastSpan = spans[spans.length - 1];
-        const position = +lastSpan.getAttribute('data-offset')! + 1;
+        const position = Number(lastSpan.getAttribute('data-offset')!) + 1;
         textareaRef.current!.selectionStart = position;
         textareaRef.current!.selectionEnd = position;
       } else {
@@ -1196,10 +1241,10 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
         for (let i = 0; i < currentLineIndex; i++) {
           const lineSpans = Array.from(lines[i].querySelectorAll('span[data-offset]'))
-            .filter(span => !span.classList.contains('newline-start'));
+            .filter((span) => !span.classList.contains('newline-start'));
           if (lineSpans.length > 0) {
             const lastSpanInLine = lineSpans[lineSpans.length - 1];
-            position = +lastSpanInLine.getAttribute('data-offset')! + 1;
+            position = Number(lastSpanInLine.getAttribute('data-offset')!) + 1;
           }
         }
 
@@ -1232,26 +1277,6 @@ const TextEditor: React.FC<TextEditorProps> = ({
     }, 0);
   };
 
-  const getPositionFromRange = (range: Range): number => {
-    const container = range.startContainer;
-    const offset = range.startOffset;
-
-    if (container.nodeType === Node.TEXT_NODE) {
-      const parentSpan = container.parentElement?.closest('span[data-offset]');
-      if (parentSpan) {
-        return +parentSpan.getAttribute('data-offset')! + offset;
-      }
-    } else if (container.nodeType === Node.ELEMENT_NODE) {
-      const element = container as Element;
-      const span = element.closest('span[data-offset]');
-      if (span) {
-        return +span.getAttribute('data-offset')! + (offset > 0 ? 1 : 0);
-      }
-    }
-
-    return 0;
-  };
-
   useEffect(() => {
     const handleSelectionChange = () => {
       if (document.activeElement !== textareaRef.current) {
@@ -1274,11 +1299,12 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
     if (targetNewlineSpan) {
       const spanRect = targetNewlineSpan.getBoundingClientRect();
-      const containerRect = contentRef.current.getBoundingClientRect();
+      const containerRect = contentRef.current!.getBoundingClientRect();
       const containerStyle = getComputedStyle(contentRef.current!);
 
       return {
-        left: +containerStyle.marginLeft.replace('px', '') + +containerStyle.paddingLeft.replace('px', ''),
+        // eslint-disable-next-line max-len
+        left: Number(containerStyle.marginLeft.replace('px', '')) + Number(containerStyle.paddingLeft.replace('px', '')),
         top: spanRect.top - containerRect.top,
       };
     }
@@ -1291,7 +1317,7 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
       return {
         left: spanRect.right - containerRect.left,
-        top: spanRect.top - containerRect.top
+        top: spanRect.top - containerRect.top,
       };
     }
 
@@ -1299,12 +1325,13 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
     if (newlineSpan) {
       const spanRect = newlineSpan.getBoundingClientRect();
-      const containerRect = contentRef.current.getBoundingClientRect();
+      const containerRect = contentRef.current!.getBoundingClientRect();
       const containerStyle = getComputedStyle(contentRef.current!);
 
       return {
-        left: +containerStyle.marginLeft.replace('px', '') + +containerStyle.paddingLeft.replace('px', ''),
-        top: spanRect.top - containerRect.top
+        // eslint-disable-next-line max-len
+        left: Number(containerStyle.marginLeft.replace('px', '')) + Number(containerStyle.paddingLeft.replace('px', '')),
+        top: spanRect.top - containerRect.top,
       };
     }
 
@@ -1316,31 +1343,30 @@ const TextEditor: React.FC<TextEditorProps> = ({
 
       return {
         left: spanRect.left - containerRect.left,
-        top: spanRect.top - containerRect.top
+        top: spanRect.top - containerRect.top,
       };
     }
 
     const containerRect = getComputedStyle(contentRef.current!);
 
     return {
-      left: +containerRect.marginLeft.replace('px', '') + +containerRect.paddingLeft.replace('px', ''),
-      top: +containerRect.marginTop.replace('px', '') + +containerRect.paddingTop.replace('px', '')
+      left: Number(containerRect.marginLeft.replace('px', '')) + Number(containerRect.paddingLeft.replace('px', '')),
+      top: Number(containerRect.marginTop.replace('px', '')) + Number(containerRect.paddingTop.replace('px', '')),
     };
   };
 
-  const blurHandler = useCallback((event: FocusEvent) => {
+  const blurHandler = useCallback((event: React.FocusEvent<HTMLTextAreaElement, Element>) => {
     onBlur?.(event);
-  }, []);
+  }, [onBlur]);
 
-  const focusHandler = useCallback((event: FocusEvent) => {
+  const focusHandler = useCallback((event: React.FocusEvent<HTMLTextAreaElement, Element>) => {
     onFocus?.(event);
-  }, []);
+  }, [onFocus]);
 
-  const updateContent = (text: string) => {
+  useEffect(() => {
     if (!contentRef.current || !caretRef.current || !textareaRef?.current) return;
 
-    const ast = parseMarkup(text);
-    console.log(ast);
+    const ast = parseMarkup(getText());
     const html = renderAst(ast, selection);
     contentRef.current.innerHTML = html || '<span></span>';
 
@@ -1350,63 +1376,41 @@ const TextEditor: React.FC<TextEditorProps> = ({
         Object.assign(caretRef.current.style, {
           left: `${coords.left}px`,
           top: `${coords.top}px`,
-          display: 'block'
+          display: 'block',
         });
       }
     } else {
       caretRef.current.style.display = 'none';
     }
-  };
+  }, [getText, selection]);
 
   return (
     <>
       <div
-        ref={contentRef}
+        ref={contentRef as React.LegacyRef<HTMLDivElement>}
         id={id}
         className={buildClassName(className, 'editor-content')}
-        onMouseDown={handlePointerDown}
-        onTouchStart={(e) => handlePointerDown(e.touches[0])}
+        onMouseDown={handlePointerDown as unknown as React.MouseEventHandler<HTMLDivElement>}
         // onClick={onClick}
         // onContextMenu={onContextMenu}
         // onTouchCancel={onTouchCancel}
         aria-label={ariaLabel}
       />
       <textarea
-        ref={textareaRef}
+        ref={textareaRef as React.LegacyRef<HTMLTextAreaElement>}
         className={buildClassName(className, 'editor-textarea')}
         value={getText()}
         onChange={handleInput}
         spellCheck={false}
-        onFocus={focusHandler}
-        onClick={onClick}
-        onTouchCancel={onTouchCancel}
+        onFocus={focusHandler as unknown as React.FocusEventHandler<HTMLTextAreaElement>}
         onKeyDown={onKeyDown}
-        onBlur={blurHandler}
+        onBlur={blurHandler as unknown as React.FocusEventHandler<HTMLTextAreaElement>}
       />
-      <div ref={caretRef} className="caret" />
+      <div ref={caretRef as React.LegacyRef<HTMLDivElement>} className="caret" />
     </>
   );
 };
-
-import { EDITABLE_INPUT_ID } from '../../config';
-import captureEscKeyListener from '../../util/captureEscKeyListener';
-import { ensureProtocol } from '../../util/ensureProtocol';
-import getKeyFromEvent from '../../util/getKeyFromEvent';
-import stopEvent from '../../util/stopEvent';
 const INPUT_CUSTOM_EMOJI_SELECTOR = 'img[data-document-id]';
-
-import useVirtualBackdrop from '../../hooks/useVirtualBackdrop';
-
-import '../middle/composer/TextFormatter.scss';
-import useAppLayout from "../../hooks/useAppLayout";
-import useInputCustomEmojis from "../middle/composer/hooks/useInputCustomEmojis";
-import parseEmojiOnlyString from "../../util/emoji/parseEmojiOnlyString";
-import {getIsDirectTextInputDisabled} from "../../util/directInputManager";
-import {debounce} from "../../util/schedulers";
-import captureKeyboardListeners from "../../util/captureKeyboardListeners";
-import TextTimer from "../ui/TextTimer";
-import {preparePastedHtml} from "../middle/composer/helpers/cleanHtml";
-import getFilesFromDataTransferItems from "../middle/composer/helpers/getFilesFromDataTransferItems";
 
 export type TextFormatterProps = {
   isOpen: boolean;
@@ -1895,7 +1899,6 @@ const TextFormatter: FC<TextFormatterProps> = ({
   );
 };
 
-
 const CONTEXT_MENU_CLOSE_DELAY_MS = 100;
 // Focus slows down animation, also it breaks transition layout in Chrome
 const FOCUS_DELAY_MS = 350;
@@ -2007,7 +2010,6 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     openPremiumModal,
   } = getActions();
 
-
   // eslint-disable-next-line no-null/no-null
   let inputRef = useRef<HTMLTextAreaElement>(null);
   if (ref) {
@@ -2058,7 +2060,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     isActive,
   );
 
-  const textRendererRef = useRef<HTMLDivElement>(null);
+  const textRendererRef = useRef<HTMLDivElement>();
   const maxInputHeight = isAttachmentModalInput
     ? MAX_ATTACHMENT_MODAL_INPUT_HEIGHT
     : isStoryInput ? MAX_STORY_MODAL_INPUT_HEIGHT : (isMobile ? 256 : 416);
@@ -2066,7 +2068,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     requestForcedReflow(() => {
       const scroller = inputRef.current!.closest<HTMLDivElement>(`.${SCROLLER_CLASS}`)!;
       const currentHeight = Number(scroller.style.height.replace('px', ''));
-      const { scrollHeight } =  inputRef.current!.scrollHeight;
+      const scrollHeight = inputRef.current!.scrollHeight;
       const newHeight = Math.min(scrollHeight, maxInputHeight);
 
       if (newHeight === currentHeight) {
@@ -2092,7 +2094,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
         return exec;
       }
     });
-  }, [getHtml]);
+  }, [maxInputHeight]);
 
   useEffect(() => {
     if (!isAttachmentModalInput) return;
@@ -2100,9 +2102,9 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
   }, [isAttachmentModalInput, updateInputHeight]);
 
   const htmlRef = useRef(getHtml());
+
   useLayoutEffect(() => {
     const html = isActive ? getHtml() : '';
-    console.log(123, html !== inputRef.current!.innerHTML)
 
     if (html !== inputRef.current!.innerHTML) {
       inputRef.current!.innerHTML = html;
@@ -2119,10 +2121,11 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     }
   }, [getHtml, isActive, updateInputHeight]);
 
+  const textareaRef = useRef<HTMLTextAreaElement>();
   const chatIdRef = useRef(chatId);
   chatIdRef.current = chatId;
   const focusInput = useLastCallback(() => {
-    if (!textareaRef.current || isNeedPremium) {
+    if (!textareaRef?.current || isNeedPremium) {
       return;
     }
 
@@ -2208,8 +2211,6 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     selectionTimeoutRef.current = window.setTimeout(processSelection, SELECTION_RECALCULATE_DELAY_MS);
   }
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   useLayoutEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.position = 'absolute';
@@ -2249,7 +2250,6 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    console.log(123123)
     // https://levelup.gitconnected.com/javascript-events-handlers-keyboard-and-load-events-1b3e46a6b0c3#1960
     const { isComposing } = e;
 
@@ -2285,7 +2285,7 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     }
   }
 
-  function handleChange(e: ChangeEvent<HTMLDivElement>) {
+  function handleChange(e: React.ChangeEvent<HTMLDivElement>) {
     const { innerHTML, textContent } = e.currentTarget;
 
     onUpdate(innerHTML === SAFARI_BR ? '' : innerHTML);
@@ -2440,15 +2440,14 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
         onClick={!isAttachmentModalInput && !canSendPlainText ? handleClick : undefined}
       >
         <div className={inputScrollerContentClass}>
+          {/* eslint-disable react/jsx-no-bind */}
           <TextEditor
             inputRef={inputRef}
             id={editableInputId || EDITABLE_INPUT_ID}
             className={className}
-            contentEditable={isAttachmentModalInput || canSendPlainText}
-            textRendererRef={textRendererRef}
+            textRendererRef={textRendererRef as RefObject<HTMLElement>}
             setText={onUpdate}
             getText={getHtml}
-            onClick={focusInput}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             onMouseDown={handleMouseDown}
@@ -2772,21 +2771,16 @@ const Composer: FC<OwnProps & StateProps> = ({
 
   // eslint-disable-next-line no-null/no-null
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const textRendererRef = useRef<HTMLElement>(null);
 
   // eslint-disable-next-line no-null/no-null
   const storyReactionRef = useRef<HTMLButtonElement>(null);
 
-  const [getHtml, onChangeHtml] = useSignal('');
+  const [getHtml, setHtml] = useSignal('');
   const [isMounted, setIsMounted] = useState(false);
   const getSelectionRange = useGetSelectionRange(editableInputCssSelector);
   const lastMessageSendTimeSeconds = useRef<number>();
   const prevDropAreaState = usePreviousDeprecated(dropAreaState);
   const { width: windowWidth } = windowSize.get();
-
-  const setHtml = (value: string) => {
-    onChangeHtml(value);
-  }
 
   const isInMessageList = type === 'messageList';
   const isInStoryViewer = type === 'story';
@@ -3016,7 +3010,7 @@ const Composer: FC<OwnProps & StateProps> = ({
     getHtml,
     setHtml,
     getSelectionRange,
-    inputRef as RefObject<HTMLDivElement>,
+    inputRef as unknown as RefObject<HTMLDivElement>,
     customEmojiForEmoji,
   );
 
@@ -3284,13 +3278,13 @@ const Composer: FC<OwnProps & StateProps> = ({
   });
 
   const sendAttachments = useLastCallback(({
-                                             attachments: attachmentsToSend,
-                                             sendCompressed = attachmentSettings.shouldCompress,
-                                             sendGrouped = attachmentSettings.shouldSendGrouped,
-                                             isSilent,
-                                             scheduledAt,
-                                             isInvertedMedia,
-                                           }: {
+    attachments: attachmentsToSend,
+    sendCompressed = attachmentSettings.shouldCompress,
+    sendGrouped = attachmentSettings.shouldSendGrouped,
+    isSilent,
+    scheduledAt,
+    isInvertedMedia,
+  }: {
     attachments: ApiAttachment[];
     sendCompressed?: boolean;
     sendGrouped?: boolean;
@@ -3393,7 +3387,6 @@ const Composer: FC<OwnProps & StateProps> = ({
     }
 
     const { text, entities } = parseAstAsFormattedText(parseMarkup(getHtml()));
-    console.log({ text, entities })
 
     if (currentAttachments.length) {
       sendAttachments({
@@ -3949,9 +3942,13 @@ const Composer: FC<OwnProps & StateProps> = ({
     },
   );
 
-  const handleRemoveEffect = useLastCallback(() => { saveEffectInDraft({ chatId, threadId, effectId: undefined }); });
+  const handleRemoveEffect = useLastCallback(() => {
+    saveEffectInDraft({ chatId, threadId, effectId: undefined });
+  });
 
-  const handleStopEffect = useLastCallback(() => { hideEffectInComposer({ }); });
+  const handleStopEffect = useLastCallback(() => {
+    hideEffectInComposer({});
+  });
 
   const onSend = useMemo(() => {
     switch (mainButtonState) {
@@ -4081,8 +4078,16 @@ const Composer: FC<OwnProps & StateProps> = ({
               </filter>
             </defs>
             <g fill="none" fill-rule="evenodd">
-              <path d="M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z" fill="#000" filter="url(#composerAppendix)" />
-              <path d="M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z" fill="#FFF" className="corner" />
+              <path
+                d="M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z"
+                fill="#000"
+                filter="url(#composerAppendix)"
+              />
+              <path
+                d="M6 17H0V0c.193 2.84.876 5.767 2.05 8.782.904 2.325 2.446 4.485 4.625 6.48A1 1 0 016 17z"
+                fill="#FFF"
+                className="corner"
+              />
             </g>
           </svg>
         )}
