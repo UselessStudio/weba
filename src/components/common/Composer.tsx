@@ -1,10 +1,10 @@
-import type { FC } from '../../lib/teact/teact';
+import {FC, getIsHeavyAnimating, type StateHookSetter, useLayoutEffect} from '../../lib/teact/teact';
 import React, {
-  memo, useEffect, useMemo, useRef, useSignal, useState,
+  memo, useMemo, useSignal, useState, useEffect, useRef, useCallback
 } from '../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../global';
 
-import type {
+import {
   ApiAttachment,
   ApiAttachMenuPeerType,
   ApiAvailableEffect,
@@ -16,9 +16,9 @@ import type {
   ApiChat,
   ApiChatFullInfo,
   ApiDraft,
-  ApiFormattedText,
+  ApiFormattedText, type ApiInputMessageReplyInfo,
   ApiMessage,
-  ApiMessageEntity,
+  ApiMessageEntity, ApiMessageEntityTypes,
   ApiNewPoll,
   ApiQuickReply,
   ApiReaction,
@@ -44,8 +44,8 @@ import { MAIN_THREAD_ID } from '../../api/types';
 
 import {
   BASE_EMOJI_KEYWORD_LANG,
-  DEFAULT_MAX_MESSAGE_LENGTH,
-  EDITABLE_INPUT_MODAL_ID,
+  DEFAULT_MAX_MESSAGE_LENGTH, EDITABLE_INPUT_CSS_SELECTOR,
+  EDITABLE_INPUT_MODAL_ID, EDITABLE_STORY_INPUT_ID,
   HEART_REACTION,
   MAX_UPLOAD_FILEPART_SIZE,
   ONE_TIME_MEDIA_TTL_SECONDS,
@@ -53,9 +53,9 @@ import {
   SEND_MESSAGE_ACTION_INTERVAL,
   SERVICE_NOTIFICATIONS_USER_ID,
 } from '../../config';
-import { requestMeasure, requestNextMutation } from '../../lib/fasterdom/fasterdom';
+import {requestForcedReflow, requestMeasure, requestMutation, requestNextMutation} from '../../lib/fasterdom/fasterdom';
 import {
-  canEditMedia,
+  canEditMedia, canReplaceMessageMedia, containsCustomEmoji,
   getAllowedAttachmentOptions,
   getReactionKey,
   getStoryKey,
@@ -63,8 +63,8 @@ import {
   isChatChannel,
   isChatSuperGroup,
   isSameReaction,
-  isSystemBot,
-  isUserId,
+  isSystemBot, isUploadingFileSticker,
+  isUserId, stripCustomEmoji,
 } from '../../global/helpers';
 import {
   selectBot,
@@ -109,7 +109,13 @@ import { MEMO_EMPTY_ARRAY } from '../../util/memo';
 import parseHtmlAsFormattedText from '../../util/parseHtmlAsFormattedText';
 import { insertHtmlInSelection } from '../../util/selection';
 import { getServerTime } from '../../util/serverTime';
-import { IS_IOS, IS_VOICE_RECORDING_SUPPORTED } from '../../util/windowEnvironment';
+import {
+  IS_ANDROID,
+  IS_EMOJI_SUPPORTED,
+  IS_IOS,
+  IS_TOUCH_ENV,
+  IS_VOICE_RECORDING_SUPPORTED
+} from '../../util/windowEnvironment';
 import windowSize from '../../util/windowSize';
 import applyIosAutoCapitalizationFix from '../middle/composer/helpers/applyIosAutoCapitalizationFix';
 import buildAttachment, { prepareAttachmentsToSend } from '../middle/composer/helpers/buildAttachment';
@@ -136,7 +142,6 @@ import { useStateRef } from '../../hooks/useStateRef';
 import useSyncEffect from '../../hooks/useSyncEffect';
 import useAttachmentModal from '../middle/composer/hooks/useAttachmentModal';
 import useChatCommandTooltip from '../middle/composer/hooks/useChatCommandTooltip';
-import useClipboardPaste from '../middle/composer/hooks/useClipboardPaste';
 import useCustomEmojiTooltip from '../middle/composer/hooks/useCustomEmojiTooltip';
 import useDraft from '../middle/composer/hooks/useDraft';
 import useEditing from '../middle/composer/hooks/useEditing';
@@ -159,7 +164,6 @@ import DropArea, { DropAreaState } from '../middle/composer/DropArea.async';
 import EmojiTooltip from '../middle/composer/EmojiTooltip.async';
 import InlineBotTooltip from '../middle/composer/InlineBotTooltip.async';
 import MentionTooltip from '../middle/composer/MentionTooltip.async';
-import MessageInput from '../middle/composer/MessageInput';
 import PollModal from '../middle/composer/PollModal.async';
 import SendAsMenu from '../middle/composer/SendAsMenu.async';
 import StickerTooltip from '../middle/composer/StickerTooltip.async';
@@ -175,6 +179,8 @@ import Icon from './icons/Icon';
 import ReactionAnimatedEmoji from './reactions/ReactionAnimatedEmoji';
 
 import './Composer.scss';
+import type {ChangeEvent, RefObject} from "react";
+import type {Signal} from "../../util/signals";
 
 type ComposerType = 'messageList' | 'story';
 
@@ -295,6 +301,2364 @@ const MOBILE_KEYBOARD_HIDE_DELAY_MS = 100;
 const SELECT_MODE_TRANSITION_MS = 200;
 const SENDING_ANIMATION_DURATION = 350;
 const MOUNT_ANIMATION_DURATION = 430;
+
+interface Token {
+  type: ApiMessageEntityTypes | 'text';
+  value?: string;
+  children?: Token[];
+  language?: string;
+  url?: string;
+  userId?: string;
+  documentId?: string;
+}
+
+interface ASTNode {
+  type: ApiMessageEntityTypes | 'text' | 'root';
+  value?: string;
+  children?: ASTNode[];
+  language?: string;
+  url?: string;
+  userId?: string;
+  documentId?: string;
+}
+
+const MARKUP_SYMBOLS = {
+  [ApiMessageEntityTypes.Bold]: '**',
+  [ApiMessageEntityTypes.Italic]: '*',
+  [ApiMessageEntityTypes.Strike]: '~~',
+  [ApiMessageEntityTypes.Underline]: '__',
+  [ApiMessageEntityTypes.Code]: '`',
+  [ApiMessageEntityTypes.Pre]: '```',
+  [ApiMessageEntityTypes.Blockquote]: '```',
+  [ApiMessageEntityTypes.Spoiler]: '||',
+  [ApiMessageEntityTypes.TextUrl]: ['[', ']'],
+  [ApiMessageEntityTypes.CustomEmoji]: ['![', ']'],
+  [ApiMessageEntityTypes.Mention]: '@'
+} as const;
+
+const HTML_TAGS = {
+  [ApiMessageEntityTypes.Bold]: 'strong',
+  [ApiMessageEntityTypes.Italic]: 'em',
+  [ApiMessageEntityTypes.Strike]: 'del',
+  [ApiMessageEntityTypes.Underline]: 'u',
+  [ApiMessageEntityTypes.Code]: 'code',
+  [ApiMessageEntityTypes.Pre]: 'pre',
+  [ApiMessageEntityTypes.Blockquote]: 'blockquote',
+  [ApiMessageEntityTypes.Spoiler]: 'span'
+} as const;
+
+interface TextEditorProps {
+  inputRef?: React.RefObject<HTMLTextAreaElement>;
+  id?: string;
+  className?: string;
+  contentEditable?: boolean;
+  onClick?: (event: React.MouseEvent<HTMLTextAreaElement>) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onMouseDown?: (event: React.MouseEvent<HTMLTextAreaElement>) => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLTextAreaElement>) => void;
+  onTouchCancel?: (event: React.TouchEvent<HTMLTextAreaElement>) => void;
+  ariaLabel?: string;
+  onFocus?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
+  onBlur?: (event: React.FocusEvent<HTMLTextAreaElement>) => void;
+  textRendererRef?: React.RefObject<HTMLElement>;
+  getText: () => string;
+  setText: (text: string) => void;
+}
+
+interface Selection {
+  start: number;
+  end: number;
+}
+
+interface CaretCoordinates {
+  left: number;
+  top: number;
+}
+
+
+interface ASTNode {
+  type: string;
+  value?: string;
+  children?: ASTNode[];
+  url?: string;
+  markers?: Marker[];
+}
+
+interface Marker {
+  start: number;
+  end: number;
+  openSymbol: string;
+  closeSymbol: string;
+}
+
+interface Token {
+  type: ApiMessageEntityTypes | "text";
+  value?: string;
+  symbol?: string;
+  text?: string;
+  url?: string;
+  children?: Token[];
+}
+
+interface ApiFormattedText {
+  text: string;
+  entities?: ApiMessageEntity[];
+}
+
+interface ApiMessageEntity {
+  type: ApiMessageEntityTypes;
+  offset: number;
+  length: number;
+  url?: string;
+  userId?: string;
+  language?: string;
+  documentId?: string;
+}
+
+function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
+  let text = '';
+  const entities: ApiMessageEntity[] = [];
+
+  function processNode(node: ASTNode): number {
+    const startPosition = text.length;
+
+    switch (node.type) {
+      case 'root':
+        node.children?.forEach(child => {
+          processNode(child);
+        });
+        break;
+
+      case 'text':
+        text += node.value || '';
+        break;
+
+      case ApiMessageEntityTypes.Pre: {
+        const value = node.value || '';
+        text += value;
+        if (value) {
+          entities.push({
+            type: node.type,
+            offset: startPosition,
+            length: value.length,
+            language: node.language
+          });
+        }
+        break;
+      }
+
+      case ApiMessageEntityTypes.Blockquote: {
+        const blockStart = text.length;
+        node.children?.forEach(child => {
+          processNode(child);
+        });
+        const length = text.length - blockStart;
+        if (length > 0) {
+          entities.push({
+            type: node.type,
+            offset: blockStart,
+            length
+          });
+        }
+        break;
+      }
+
+      case ApiMessageEntityTypes.Code: {
+        const value = node.value || '';
+        if (!value || !value.trim()) {
+          text += value;
+        } else {
+          text += value;
+          entities.push({
+            type: node.type,
+            offset: startPosition,
+            length: value.length
+          });
+        }
+        break;
+      }
+
+      case ApiMessageEntityTypes.TextUrl: {
+        const value = node.value || '';
+        text += value;
+        if (value) {
+          entities.push({
+            type: node.type,
+            offset: startPosition,
+            length: value.length,
+            url: node.url
+          });
+        }
+        break;
+      }
+
+      case ApiMessageEntityTypes.CustomEmoji: {
+        const value = node.value || '';
+        text += value;
+        if (value) {
+          entities.push({
+            type: node.type,
+            offset: startPosition,
+            length: value.length,
+            documentId: node.documentId
+          });
+        }
+        break;
+      }
+
+      case ApiMessageEntityTypes.Mention: {
+        const value = node.value || '';
+        text += value;
+        if (value) {
+          entities.push({
+            type: node.type,
+            offset: startPosition,
+            length: value.length
+          });
+        }
+        break;
+      }
+
+      case ApiMessageEntityTypes.Bold:
+      case ApiMessageEntityTypes.Italic:
+      case ApiMessageEntityTypes.Strike:
+      case ApiMessageEntityTypes.Underline:
+      case ApiMessageEntityTypes.Spoiler: {
+        // Собираем весь текст внутри форматирования
+        let formattedText = '';
+        const collectInnerText = (n: ASTNode) => {
+          if (n.type === 'text') {
+            formattedText += n.value || '';
+          }
+          n.children?.forEach(collectInnerText);
+        };
+        node.children?.forEach(collectInnerText);
+
+        if (!formattedText || !formattedText.trim()) {
+          text += formattedText;
+        } else {
+          // Определяем, является ли элемент первым или последним
+          const isFirst = text.length === 0;
+          const isLast = !ast.children?.slice(startPosition + 1).some(n => n.type !== 'text' || (n.value && n.value.trim()));
+
+          // Обрабатываем пробелы в зависимости от позиции
+          const leftTrimmed = isFirst ? formattedText.trimStart() : formattedText;
+          const rightTrimmed = isLast ? leftTrimmed.trimEnd() : leftTrimmed;
+
+          const startTrim = formattedText.length - leftTrimmed.length;
+          const endTrim = leftTrimmed.length - rightTrimmed.length;
+
+          // Добавляем обрезанные пробелы как обычный текст
+          text += formattedText.slice(0, startTrim);
+
+          const entityStart = text.length;
+          text += rightTrimmed;
+
+          if (rightTrimmed) {
+            entities.push({
+              type: node.type,
+              offset: entityStart,
+              length: rightTrimmed.length
+            });
+          }
+
+          // Добавляем пробелы в конце как обычный текст
+          if (endTrim > 0) {
+            text += formattedText.slice(formattedText.length - endTrim);
+          }
+        }
+        break;
+      }
+    }
+
+    return startPosition;
+  }
+
+  processNode(ast);
+
+  // Sort entities by offset and handle nested entities
+  entities.sort((a, b) => {
+    if (a.offset !== b.offset) {
+      return a.offset - b.offset;
+    }
+    return b.length - a.length;
+  });
+
+  return {
+    text: text.trim(),
+    entities: entities.length > 0 ? entities : undefined
+  };
+}
+
+function tokenize(input: string, isNested: boolean = false): Token[] {
+  const tokens: Token[] = [];
+  let pos = 0;
+
+  function isEscaped(pos: number): boolean {
+    let backslashCount = 0;
+    let i = pos - 1;
+    while (i >= 0 && input[i] === '\\') {
+      backslashCount++;
+      i--;
+    }
+    return backslashCount % 2 === 1;
+  }
+
+  function findClosingSymbol(symbol: string, startPos: number): number {
+    let pos = startPos;
+    while (pos < input.length) {
+      if (input.startsWith(symbol, pos) && !isEscaped(pos)) {
+        return pos;
+      }
+      pos++;
+    }
+    return -1;
+  }
+
+  function handleBlockQuoteOrPre(): { token: Token; newPos: number } | null {
+    if (!input.startsWith('```', pos) || isEscaped(pos) || isNested) return null;
+
+    let currentPos = pos + 3;
+    let isQuote = false;
+
+    if (input[currentPos] === 'q' && input[currentPos + 1] === ' ') {
+      isQuote = true;
+      currentPos += 2;
+    }
+
+    if (input[currentPos] === '\n') {
+      currentPos++;
+    }
+
+    const endPos = findClosingSymbol('```', currentPos);
+    if (endPos === -1) return null;
+
+    const content = input.slice(currentPos, endPos);
+    const type = isQuote ? ApiMessageEntityTypes.Blockquote : ApiMessageEntityTypes.Pre;
+
+    return {
+      token: {
+        type,
+        value: type === ApiMessageEntityTypes.Pre ? content : undefined,
+        children: type === ApiMessageEntityTypes.Blockquote ? tokenize(content, true) : undefined,
+      },
+      newPos: endPos + 3
+    };
+  }
+
+  function handleInlineCode(): { token: Token; newPos: number } | null {
+    if (input[pos] !== '`' || isEscaped(pos)) return null;
+
+    const endPos = findClosingSymbol('`', pos + 1);
+    if (endPos === -1) return null;
+
+    const content = input.slice(pos + 1, endPos);
+
+    // Don't parse if empty or contains newline
+    if (content.length === 0 || content.includes('\n')) {
+      return null;
+    }
+
+    return {
+      token: {
+        type: ApiMessageEntityTypes.Code,
+        value: content
+      },
+      newPos: endPos + 1
+    };
+  }
+
+  function handleTextUrl(): { token: Token; newPos: number } | null {
+    const isEmoji = input[pos] === '!' && input[pos + 1] === '[';
+    if ((!isEmoji && input[pos] !== '[') || isEscaped(pos)) return null;
+
+    const textStart = isEmoji ? pos + 2 : pos + 1;
+    const textEnd = findClosingSymbol(']', textStart);
+
+    if (textEnd === -1) return null;
+    if (input[textEnd + 1] !== '(') return null;
+
+    const urlStart = textEnd + 2;
+    const urlEnd = findClosingSymbol(')', urlStart);
+
+    if (urlEnd === -1) return null;
+
+    return {
+      token: {
+        type: isEmoji ? ApiMessageEntityTypes.CustomEmoji : ApiMessageEntityTypes.TextUrl,
+        value: input.slice(textStart, textEnd),
+        url: input.slice(urlStart, urlEnd)
+      },
+      newPos: urlEnd + 1
+    };
+  }
+
+  function handleMention(): { token: Token; newPos: number } | null {
+    if (input[pos] !== '@' || isEscaped(pos)) return null;
+
+    let end = pos + 1;
+    while (end < input.length && /[a-zA-Z0-9_]/.test(input[end])) {
+      end++;
+    }
+
+    if (end === pos + 1) return null;
+
+    return {
+      token: {
+        type: ApiMessageEntityTypes.Mention,
+        value: input.slice(pos + 1, end)
+      },
+      newPos: end
+    };
+  }
+
+  function handleFormatting(): { token: Token; newPos: number } | null {
+    const formatters = [
+      { symbol: '**', type: ApiMessageEntityTypes.Bold },
+      { symbol: '*', type: ApiMessageEntityTypes.Italic },
+      { symbol: '~~', type: ApiMessageEntityTypes.Strike },
+      { symbol: '__', type: ApiMessageEntityTypes.Underline },
+      { symbol: '||', type: ApiMessageEntityTypes.Spoiler }
+    ];
+
+    for (const { symbol, type } of formatters) {
+      if (!input.startsWith(symbol, pos) || isEscaped(pos)) continue;
+
+      const endPos = findClosingSymbol(symbol, pos + symbol.length);
+      if (endPos === -1) continue;
+
+      const innerContent = input.slice(pos + symbol.length, endPos);
+      const children = tokenize(innerContent, isNested);
+
+      return {
+        token: {
+          type,
+          children
+        },
+        newPos: endPos + symbol.length
+      };
+    }
+
+    return null;
+  }
+
+  while (pos < input.length) {
+    if (input[pos] === '\\' && pos + 1 < input.length) {
+      tokens.push({ type: 'text', value: input[pos + 1] });
+      pos += 2;
+      continue;
+    }
+
+    const blockResult = handleBlockQuoteOrPre();
+    if (blockResult) {
+      tokens.push(blockResult.token);
+      pos = blockResult.newPos;
+      continue;
+    }
+
+    const codeResult = handleInlineCode();
+    if (codeResult) {
+      tokens.push(codeResult.token);
+      pos = codeResult.newPos;
+      continue;
+    }
+
+    const urlResult = handleTextUrl();
+    if (urlResult) {
+      tokens.push(urlResult.token);
+      pos = urlResult.newPos;
+      continue;
+    }
+
+    const mentionResult = handleMention();
+    if (mentionResult) {
+      tokens.push(mentionResult.token);
+      pos = mentionResult.newPos;
+      continue;
+    }
+
+    const formattingResult = handleFormatting();
+    if (formattingResult) {
+      tokens.push(formattingResult.token);
+      pos = formattingResult.newPos;
+      continue;
+    }
+
+    let textEnd = pos + 1;
+    while (textEnd < input.length) {
+      const nextChar = input[textEnd];
+      if ('\\*_~`[|@!'.includes(nextChar) && !isEscaped(textEnd)) {
+        break;
+      }
+      textEnd++;
+    }
+
+    tokens.push({
+      type: 'text',
+      value: input.slice(pos, textEnd)
+    });
+    pos = textEnd;
+  }
+
+  return tokens;
+}
+
+function parse(tokens: Token[]): ASTNode {
+  function processToken(token: Token): ASTNode {
+    const node: ASTNode = {
+      type: token.type,
+      value: token.value,
+      language: token.language,
+      url: token.url
+    };
+
+    if (token.children) {
+      node.children = token.children.map(processToken);
+    }
+
+    return node;
+  }
+
+  function mergeTextNodes(nodes: ASTNode[]): ASTNode[] {
+    const result: ASTNode[] = [];
+    let currentTextNode: ASTNode | null = null;
+
+    for (const node of nodes) {
+      if (node.type === 'text') {
+        if (currentTextNode) {
+          currentTextNode.value = (currentTextNode.value || '') + (node.value || '');
+        } else {
+          currentTextNode = node;
+          result.push(currentTextNode);
+        }
+      } else {
+        currentTextNode = null;
+        if (node.children) {
+          node.children = mergeTextNodes(node.children);
+        }
+        result.push(node);
+      }
+    }
+
+    return result;
+  }
+
+  const processedNodes = tokens.map(processToken);
+  const mergedNodes = mergeTextNodes(processedNodes);
+
+  return {
+    type: 'root',
+    children: mergedNodes
+  };
+}
+
+function renderAst(node: ASTNode, selection: Selection): string {
+  const result: string[] = [];
+  let currentLine = '';
+  let currentPosition = 0;
+  let needNewLineStart = false;
+
+  const processTextNode = (text: string, start: number): string => {
+    let line = '';
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i];
+      const currentPos = start + i;
+      const isSelected = currentPos >= selection.start && currentPos < selection.end;
+
+      if (char === ' ') {
+        line += `<span class="space${isSelected ? ' selected' : ''}" data-offset="${currentPos}"> </span>`;
+      } else if (char === '\n') {
+        line += `<span class="newline${isSelected ? ' selected' : ''}" data-offset="${currentPos}"></span>`;
+        needNewLineStart = true;
+      } else {
+        const escapedChar = escapeHtml(char);
+        line += `<span${isSelected ? ' class="selected"' : ''} data-offset="${currentPos}">${escapedChar}</span>`;
+      }
+    }
+    return line;
+  };
+
+  const processMarkupSymbols = (symbols: string, start: number): string => {
+    let result = '';
+    for (let i = 0; i < symbols.length; i++) {
+      const currentPos = start + i;
+      const isSelected = currentPos >= selection.start && currentPos < selection.end;
+      result += `<span class="markup-symbol${isSelected ? ' selected' : ''}" data-offset="${currentPos}">${symbols[i]}</span>`;
+    }
+    return result;
+  };
+
+  const startNewLine = (virtualOffset: number) => {
+    if (needNewLineStart) {
+      const isSelected = virtualOffset >= selection.start && virtualOffset < selection.end;
+      currentLine = `<span class="newline-start${isSelected ? ' selected' : ''}" data-virtual-offset="${virtualOffset}"></span>`;
+      needNewLineStart = false;
+    }
+  };
+
+  const flushLine = () => {
+    if (currentLine) {
+      result.push(`<div class="editor-line">${currentLine}</div>`);
+      currentLine = '';
+      startNewLine(currentPosition - 1);
+    }
+  };
+
+  const renderBlockContent = (content: string | undefined, children: ASTNode[] | undefined, tag: string, type: ApiMessageEntityTypes, language?: string) => {
+    const blockAttrs = language
+      ? `class="code-block" data-entity-type="${type}" data-language="${language}"`
+      : `class="text-entity-blockquote" data-entity-type="${type}"`;
+
+    result.push(`<${tag} ${blockAttrs}>`);
+
+    if (content) {
+      // For Pre blocks - render content directly
+      const lines = content.split('\n');
+      lines.forEach((line, index) => {
+        currentLine = processTextNode(line, currentPosition);
+        currentPosition += line.length;
+
+        if (index < lines.length - 1) {
+          currentLine += processTextNode('\n', currentPosition);
+          currentPosition += 1;
+        }
+        result.push(`<div class="editor-line">${currentLine}</div>`);
+        currentLine = '';
+      });
+    } else if (children) {
+      // For Blockquote - render children with markup
+      children.forEach(child => renderNode(child));
+      flushLine();
+    }
+
+    result.push(`</${tag}>`);
+  };
+
+  const renderNode = (node: ASTNode): void => {
+    switch (node.type) {
+      case 'root':
+        node.children?.forEach(child => renderNode(child));
+        flushLine();
+        break;
+
+      case 'text': {
+        const text = node.value || '';
+        const lines = text.split('\n');
+
+        lines.forEach((line, index) => {
+          currentLine += processTextNode(line, currentPosition);
+          currentPosition += line.length;
+
+          if (index < lines.length - 1) {
+            currentLine += processTextNode('\n', currentPosition);
+            currentPosition += 1;
+            flushLine();
+          }
+        });
+        break;
+      }
+
+      case ApiMessageEntityTypes.Pre: {
+        flushLine();
+        const language = node.language ? `[${node.language}]` : '';
+
+        currentLine += processMarkupSymbols('```' + language + '\n', currentPosition);
+        currentPosition += 3 + language.length + 1;
+        flushLine();
+
+        renderBlockContent(node.value, undefined, 'pre', node.type, node.language);
+
+        currentLine = processMarkupSymbols('\n```', currentPosition);
+        currentPosition += 4;
+        flushLine();
+        break;
+      }
+
+      case ApiMessageEntityTypes.Blockquote: {
+        flushLine();
+
+        currentLine += processMarkupSymbols('```\n', currentPosition);
+        currentPosition += 4;
+        flushLine();
+
+        renderBlockContent(undefined, node.children, 'blockquote', node.type);
+
+        currentLine = processMarkupSymbols('\n```', currentPosition);
+        currentPosition += 4;
+        flushLine();
+        break;
+      }
+
+      case ApiMessageEntityTypes.Code: {
+        currentLine += processMarkupSymbols('`', currentPosition);
+        currentPosition += 1;
+
+        currentLine += `<code class="text-entity-code" data-entity-type="${node.type}">`;
+        currentLine += processTextNode(node.value || '', currentPosition);
+        currentPosition += (node.value || '').length;
+        currentLine += '</code>';
+
+        currentLine += processMarkupSymbols('`', currentPosition);
+        currentPosition += 1;
+        break;
+      }
+
+      case ApiMessageEntityTypes.Bold:
+      case ApiMessageEntityTypes.Italic:
+      case ApiMessageEntityTypes.Strike:
+      case ApiMessageEntityTypes.Underline:
+      case ApiMessageEntityTypes.Spoiler: {
+        const symbol = MARKUP_SYMBOLS[node.type] as string;
+        const tag = HTML_TAGS[node.type];
+        const className = node.type === ApiMessageEntityTypes.Spoiler ? ' class="spoiler"' : '';
+
+        currentLine += processMarkupSymbols(symbol, currentPosition);
+        currentPosition += symbol.length;
+
+        currentLine += `<${tag}${className} data-entity-type="${node.type}">`;
+        node.children?.forEach(child => renderNode(child));
+        currentLine += `</${tag}>`;
+
+        currentLine += processMarkupSymbols(symbol, currentPosition);
+        currentPosition += symbol.length;
+        break;
+      }
+
+      case ApiMessageEntityTypes.TextUrl: {
+        currentLine += processMarkupSymbols('[', currentPosition);
+        currentPosition += 1;
+
+        currentLine += `<a href="${escapeHtml(node.url || '')}" target="_blank" rel="noopener noreferrer" data-entity-type="${node.type}">`;
+        currentLine += processTextNode(node.value || '', currentPosition);
+        currentPosition += (node.value || '').length;
+        currentLine += '</a>';
+
+        const urlPart = `](${node.url})`;
+        currentLine += processMarkupSymbols(urlPart, currentPosition);
+        currentPosition += urlPart.length;
+        break;
+      }
+
+      case ApiMessageEntityTypes.Mention: {
+        currentLine += processMarkupSymbols('@', currentPosition);
+        currentPosition += 1;
+
+        currentLine += `<span class="mention" data-entity-type="${node.type}">`;
+        currentLine += processTextNode(node.value || '', currentPosition);
+        currentPosition += (node.value || '').length;
+        currentLine += '</span>';
+        break;
+      }
+
+      case ApiMessageEntityTypes.CustomEmoji: {
+        currentLine += processMarkupSymbols('![', currentPosition);
+        currentPosition += 2;
+
+        const alt = escapeHtml(node.value || '');
+        currentLine += processTextNode(node.value || '', currentPosition);
+        currentPosition += (node.value || '').length;
+
+        const urlPart = `](${node.url})`;
+        currentLine += processMarkupSymbols(urlPart, currentPosition);
+        currentPosition += urlPart.length;
+
+        currentLine += `<img class="emoji" alt="${alt}" src="${node.url || ''}" data-entity-type="${node.type}" />`;
+        break;
+      }
+    }
+  };
+
+  renderNode(node);
+  flushLine();
+
+  return result.join('');
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function parseMarkup(text: string): ASTNode {
+  return parse(tokenize(text));
+}
+
+const TextEditor: React.FC<TextEditorProps> = ({
+ inputRef,
+ id,
+ className,
+ contentEditable = false,
+ textRendererRef,
+ onClick,
+ onKeyDown,
+ onMouseDown,
+ onContextMenu,
+ onTouchCancel,
+ ariaLabel,
+ onFocus,
+ onBlur,
+ setText,
+ getText,
+}) => {
+  const [selection, setSelection] = useState<Selection>({ start: 0, end: 0 });
+  let contentRef = useRef<HTMLDivElement>(null);
+  let textareaRef = useRef<HTMLTextAreaElement>(null);
+  const caretRef = useRef<HTMLDivElement>(null);
+
+  if (textRendererRef) {
+    contentRef = textRendererRef as RefObject<HTMLDivElement | null>;
+  }
+  if (inputRef) {
+    textareaRef = inputRef;
+  }
+
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const handleSelectionChange = () => {
+      if (document.activeElement === textarea) {
+        setSelection({
+          start: textarea.selectionStart || 0,
+          end: textarea.selectionEnd || 0
+        });
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    textarea.addEventListener('input', handleSelectionChange);
+    textarea.addEventListener('keyup', handleSelectionChange);
+    textarea.addEventListener('focus', handleSelectionChange);
+
+
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      textarea.removeEventListener('input', handleSelectionChange);
+      textarea.removeEventListener('keyup', handleSelectionChange);
+      textarea.addEventListener('focus', handleSelectionChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    updateContent(getText());
+  }, [getText, selection]);
+
+  const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(e.target.value);
+  };
+
+  const handlePointerDown = (e: { clientX: number; clientY: number, target: HTMLElement, detail: number }) => {
+    if (!e.target) {
+      textareaRef.current!.selectionStart = 0;
+      textareaRef.current!.selectionEnd = 0;
+      setTimeout(() => {
+        textareaRef.current!.focus();
+      }, 0);
+      return;
+    }
+
+    if (e.detail >= 2) {
+      const line = e.target.closest('.editor-line');
+      if (!line) return;
+
+      const spans = Array.from(line.querySelectorAll('span[data-offset]'))
+        .filter(span => !span.classList.contains('newline-end'));
+
+      if (spans.length === 0) return;
+
+      const firstSpan = spans[0];
+      const lastSpan = spans[spans.length - 1];
+
+      const startPosition = +firstSpan.getAttribute('data-offset')!;
+      const endPosition = +lastSpan.getAttribute('data-offset')! + 1;
+
+      textareaRef.current!.selectionStart = startPosition;
+      textareaRef.current!.selectionEnd = endPosition;
+
+      setTimeout(() => {
+        textareaRef.current!.focus();
+      }, 0);
+      return;
+    }
+
+    // Если клик точно на пустое место в линии (не на span)
+    if (e.target.classList.contains('editor-line')) {
+      const clickedLine = e.target as HTMLElement;
+      const spans = Array.from(clickedLine.querySelectorAll('span[data-offset]'))
+        .filter(span => !span.classList.contains('newline-end') && !span.classList.contains('newline-start'));
+
+      if (spans.length > 0) {
+        // Если есть символы, ставим каретку после последнего
+        const lastSpan = spans[spans.length - 1];
+        const position = +lastSpan.getAttribute('data-offset')! + 1;
+        textareaRef.current!.selectionStart = position;
+        textareaRef.current!.selectionEnd = position;
+      } else {
+        // Если линия пустая, находим её позицию
+        const lines = Array.from(contentRef.current!.querySelectorAll('.editor-line'));
+        const currentLineIndex = lines.indexOf(clickedLine);
+        let position = 0;
+
+        for (let i = 0; i < currentLineIndex; i++) {
+          const lineSpans = Array.from(lines[i].querySelectorAll('span[data-offset]'))
+            .filter(span => !span.classList.contains('newline-start'));
+          if (lineSpans.length > 0) {
+            const lastSpanInLine = lineSpans[lineSpans.length - 1];
+            position = +lastSpanInLine.getAttribute('data-offset')! + 1;
+          }
+        }
+
+        textareaRef.current!.selectionStart = position;
+        textareaRef.current!.selectionEnd = position;
+      }
+
+      setTimeout(() => {
+        textareaRef.current!.focus();
+        setTimeout(() => {
+          textareaRef.current?.focus();
+        }, 50);
+      }, 0);
+      return;
+    }
+
+    // Для всех остальных случаев используем нативное поведение
+    const range = document.caretRangeFromPoint?.(e.clientX, e.clientY);
+    if (range && textareaRef.current) {
+      const position = getPositionFromRange(range);
+      textareaRef.current.selectionStart = position;
+      textareaRef.current.selectionEnd = position;
+    }
+
+    setTimeout(() => {
+      textareaRef.current!.focus();
+      setTimeout(() => {
+        textareaRef.current?.focus();
+      }, 50);
+    }, 0);
+  };
+
+  const getPositionFromRange = (range: Range): number => {
+    const container = range.startContainer;
+    const offset = range.startOffset;
+
+    if (container.nodeType === Node.TEXT_NODE) {
+      const parentSpan = container.parentElement?.closest('span[data-offset]');
+      if (parentSpan) {
+        return +parentSpan.getAttribute('data-offset')! + offset;
+      }
+    } else if (container.nodeType === Node.ELEMENT_NODE) {
+      const element = container as Element;
+      const span = element.closest('span[data-offset]');
+      if (span) {
+        return +span.getAttribute('data-offset')! + (offset > 0 ? 1 : 0);
+      }
+    }
+
+    return 0;
+  };
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      if (document.activeElement !== textareaRef.current) {
+        setTimeout(() => {
+          textareaRef.current?.focus();
+        }, 0);
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
+
+  const getCaretCoordinates = (): CaretCoordinates | null => {
+    const position = textareaRef.current!.selectionStart;
+
+    const targetNewlineSpan = contentRef.current!.querySelector(`span[data-virtual-offset="${position - 1}"]`);
+
+    if (targetNewlineSpan) {
+      const spanRect = targetNewlineSpan.getBoundingClientRect();
+      const containerRect = contentRef.current.getBoundingClientRect();
+      const containerStyle = getComputedStyle(contentRef.current!);
+
+      return {
+        left: +containerStyle.marginLeft.replace('px', '') + +containerStyle.paddingLeft.replace('px', ''),
+        top: spanRect.top - containerRect.top,
+      };
+    }
+
+    const previousSpan = contentRef.current!.querySelector(`span[data-offset="${position - 1}"]`);
+
+    if (previousSpan) {
+      const spanRect = previousSpan.getBoundingClientRect();
+      const containerRect = contentRef.current!.getBoundingClientRect();
+
+      return {
+        left: spanRect.right - containerRect.left,
+        top: spanRect.top - containerRect.top
+      };
+    }
+
+    const newlineSpan = contentRef.current!.querySelector(`span[data-virtual-offset="${position}"]`);
+
+    if (newlineSpan) {
+      const spanRect = newlineSpan.getBoundingClientRect();
+      const containerRect = contentRef.current.getBoundingClientRect();
+      const containerStyle = getComputedStyle(contentRef.current!);
+
+      return {
+        left: +containerStyle.marginLeft.replace('px', '') + +containerStyle.paddingLeft.replace('px', ''),
+        top: spanRect.top - containerRect.top
+      };
+    }
+
+    const targetSpan = contentRef.current!.querySelector(`span[data-offset="${position}"]`);
+
+    if (targetSpan) {
+      const spanRect = targetSpan.getBoundingClientRect();
+      const containerRect = contentRef.current!.getBoundingClientRect();
+
+      return {
+        left: spanRect.left - containerRect.left,
+        top: spanRect.top - containerRect.top
+      };
+    }
+
+    const containerRect = getComputedStyle(contentRef.current!);
+
+    return {
+      left: +containerRect.marginLeft.replace('px', '') + +containerRect.paddingLeft.replace('px', ''),
+      top: +containerRect.marginTop.replace('px', '') + +containerRect.paddingTop.replace('px', '')
+    };
+  };
+
+  const blurHandler = useCallback((event: FocusEvent) => {
+    onBlur?.(event);
+  }, []);
+
+  const focusHandler = useCallback((event: FocusEvent) => {
+    onFocus?.(event);
+  }, []);
+
+  const updateContent = (text: string) => {
+    if (!contentRef.current || !caretRef.current || !textareaRef?.current) return;
+
+    const ast = parseMarkup(text);
+    console.log(ast);
+    const html = renderAst(ast, selection);
+    contentRef.current.innerHTML = html || '<span></span>';
+
+    if (selection.start === selection.end) {
+      const coords = getCaretCoordinates();
+      if (coords) {
+        Object.assign(caretRef.current.style, {
+          left: `${coords.left}px`,
+          top: `${coords.top}px`,
+          display: 'block'
+        });
+      }
+    } else {
+      caretRef.current.style.display = 'none';
+    }
+  };
+
+  return (
+    <>
+      <div
+        ref={contentRef}
+        id={id}
+        className={buildClassName(className, 'editor-content')}
+        onMouseDown={handlePointerDown}
+        onTouchStart={(e) => handlePointerDown(e.touches[0])}
+        // onClick={onClick}
+        // onContextMenu={onContextMenu}
+        // onTouchCancel={onTouchCancel}
+        aria-label={ariaLabel}
+      />
+      <textarea
+        ref={textareaRef}
+        className={buildClassName(className, 'editor-textarea')}
+        value={getText()}
+        onChange={handleInput}
+        spellCheck={false}
+        onFocus={focusHandler}
+        onClick={onClick}
+        onTouchCancel={onTouchCancel}
+        onKeyDown={onKeyDown}
+        onBlur={blurHandler}
+      />
+      <div ref={caretRef} className="caret" />
+    </>
+  );
+};
+
+import { EDITABLE_INPUT_ID } from '../../config';
+import captureEscKeyListener from '../../util/captureEscKeyListener';
+import { ensureProtocol } from '../../util/ensureProtocol';
+import getKeyFromEvent from '../../util/getKeyFromEvent';
+import stopEvent from '../../util/stopEvent';
+const INPUT_CUSTOM_EMOJI_SELECTOR = 'img[data-document-id]';
+
+import useVirtualBackdrop from '../../hooks/useVirtualBackdrop';
+
+import '../middle/composer/TextFormatter.scss';
+import useAppLayout from "../../hooks/useAppLayout";
+import useInputCustomEmojis from "../middle/composer/hooks/useInputCustomEmojis";
+import parseEmojiOnlyString from "../../util/emoji/parseEmojiOnlyString";
+import {getIsDirectTextInputDisabled} from "../../util/directInputManager";
+import {debounce} from "../../util/schedulers";
+import captureKeyboardListeners from "../../util/captureKeyboardListeners";
+import TextTimer from "../ui/TextTimer";
+import {preparePastedHtml} from "../middle/composer/helpers/cleanHtml";
+import getFilesFromDataTransferItems from "../middle/composer/helpers/getFilesFromDataTransferItems";
+
+export type TextFormatterProps = {
+  isOpen: boolean;
+  anchorPosition?: IAnchorPosition;
+  selectedRange?: Range;
+  setSelectedRange: (range: Range) => void;
+  onClose: () => void;
+};
+
+interface ISelectedTextFormats {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
+  monospace?: boolean;
+  spoiler?: boolean;
+}
+
+const TEXT_FORMAT_BY_TAG_NAME: Record<string, keyof ISelectedTextFormats> = {
+  B: 'bold',
+  STRONG: 'bold',
+  I: 'italic',
+  EM: 'italic',
+  U: 'underline',
+  DEL: 'strikethrough',
+  CODE: 'monospace',
+  SPAN: 'spoiler',
+};
+const fragmentEl = document.createElement('div');
+
+const TextFormatter: FC<TextFormatterProps> = ({
+  isOpen,
+  anchorPosition,
+  selectedRange,
+  setSelectedRange,
+  onClose,
+}) => {
+  // eslint-disable-next-line no-null/no-null
+  const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line no-null/no-null
+  const linkUrlInputRef = useRef<HTMLInputElement>(null);
+  const { shouldRender, transitionClassNames } = useShowTransitionDeprecated(isOpen);
+  const [isLinkControlOpen, openLinkControl, closeLinkControl] = useFlag();
+  const [linkUrl, setLinkUrl] = useState('');
+  const [isEditingLink, setIsEditingLink] = useState(false);
+  const [inputClassName, setInputClassName] = useState<string | undefined>();
+  const [selectedTextFormats, setSelectedTextFormats] = useState<ISelectedTextFormats>({});
+
+  useEffect(() => (isOpen ? captureEscKeyListener(onClose) : undefined), [isOpen, onClose]);
+  useVirtualBackdrop(
+    isOpen,
+    containerRef,
+    onClose,
+    true,
+  );
+
+  useEffect(() => {
+    if (isLinkControlOpen) {
+      linkUrlInputRef.current!.focus();
+    } else {
+      setLinkUrl('');
+      setIsEditingLink(false);
+    }
+  }, [isLinkControlOpen]);
+
+  useEffect(() => {
+    if (!shouldRender) {
+      closeLinkControl();
+      setSelectedTextFormats({});
+      setInputClassName(undefined);
+    }
+  }, [closeLinkControl, shouldRender]);
+
+  useEffect(() => {
+    if (!isOpen || !selectedRange) {
+      return;
+    }
+
+    const selectedFormats: ISelectedTextFormats = {};
+    let { parentElement } = selectedRange.commonAncestorContainer;
+    while (parentElement && parentElement.id !== EDITABLE_INPUT_ID) {
+      const textFormat = TEXT_FORMAT_BY_TAG_NAME[parentElement.tagName];
+      if (textFormat) {
+        selectedFormats[textFormat] = true;
+      }
+
+      parentElement = parentElement.parentElement;
+    }
+
+    setSelectedTextFormats(selectedFormats);
+  }, [isOpen, selectedRange, openLinkControl]);
+
+  const restoreSelection = useLastCallback(() => {
+    if (!selectedRange) {
+      return;
+    }
+
+    const selection = window.getSelection();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(selectedRange);
+    }
+  });
+
+  const updateSelectedRange = useLastCallback(() => {
+    const selection = window.getSelection();
+    if (selection) {
+      setSelectedRange(selection.getRangeAt(0));
+    }
+  });
+
+  const getSelectedText = useLastCallback((shouldDropCustomEmoji?: boolean) => {
+    if (!selectedRange) {
+      return undefined;
+    }
+    fragmentEl.replaceChildren(selectedRange.cloneContents());
+    if (shouldDropCustomEmoji) {
+      fragmentEl.querySelectorAll(INPUT_CUSTOM_EMOJI_SELECTOR).forEach((el) => {
+        el.replaceWith(el.getAttribute('alt')!);
+      });
+    }
+    return fragmentEl.innerHTML;
+  });
+
+  const getSelectedElement = useLastCallback(() => {
+    if (!selectedRange) {
+      return undefined;
+    }
+
+    return selectedRange.commonAncestorContainer.parentElement;
+  });
+
+  function updateInputStyles() {
+    const input = linkUrlInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    const { offsetWidth, scrollWidth, scrollLeft } = input;
+    if (scrollWidth <= offsetWidth) {
+      setInputClassName(undefined);
+      return;
+    }
+
+    let className = '';
+    if (scrollLeft < scrollWidth - offsetWidth) {
+      className = 'mask-right';
+    }
+    if (scrollLeft > 0) {
+      className += ' mask-left';
+    }
+
+    setInputClassName(className);
+  }
+
+  function handleLinkUrlChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setLinkUrl(e.target.value);
+    updateInputStyles();
+  }
+
+  function getFormatButtonClassName(key: keyof ISelectedTextFormats) {
+    if (selectedTextFormats[key]) {
+      return 'active';
+    }
+
+    if (key === 'monospace' || key === 'strikethrough') {
+      if (Object.keys(selectedTextFormats).some(
+        (fKey) => fKey !== key && Boolean(selectedTextFormats[fKey as keyof ISelectedTextFormats]),
+      )) {
+        return 'disabled';
+      }
+    } else if (selectedTextFormats.monospace || selectedTextFormats.strikethrough) {
+      return 'disabled';
+    }
+
+    return undefined;
+  }
+
+  const handleSpoilerText = useLastCallback(() => {
+    if (selectedTextFormats.spoiler) {
+      const element = getSelectedElement();
+      if (
+        !selectedRange
+        || !element
+        || element.dataset.entityType !== ApiMessageEntityTypes.Spoiler
+        || !element.textContent
+      ) {
+        return;
+      }
+
+      element.replaceWith(element.textContent);
+      setSelectedTextFormats((selectedFormats) => ({
+        ...selectedFormats,
+        spoiler: false,
+      }));
+
+      return;
+    }
+
+    const text = getSelectedText();
+    document.execCommand(
+      'insertHTML', false, `<span class="spoiler" data-entity-type="${ApiMessageEntityTypes.Spoiler}">${text}</span>`,
+    );
+    onClose();
+  });
+
+  const handleBoldText = useLastCallback(() => {
+    setSelectedTextFormats((selectedFormats) => {
+      // Somehow re-applying 'bold' command to already bold text doesn't work
+      document.execCommand(selectedFormats.bold ? 'removeFormat' : 'bold');
+      Object.keys(selectedFormats).forEach((key) => {
+        if ((key === 'italic' || key === 'underline') && Boolean(selectedFormats[key])) {
+          document.execCommand(key);
+        }
+      });
+
+      updateSelectedRange();
+      return {
+        ...selectedFormats,
+        bold: !selectedFormats.bold,
+      };
+    });
+  });
+
+  const handleItalicText = useLastCallback(() => {
+    document.execCommand('italic');
+    updateSelectedRange();
+    setSelectedTextFormats((selectedFormats) => ({
+      ...selectedFormats,
+      italic: !selectedFormats.italic,
+    }));
+  });
+
+  const handleUnderlineText = useLastCallback(() => {
+    document.execCommand('underline');
+    updateSelectedRange();
+    setSelectedTextFormats((selectedFormats) => ({
+      ...selectedFormats,
+      underline: !selectedFormats.underline,
+    }));
+  });
+
+  const handleStrikethroughText = useLastCallback(() => {
+    if (selectedTextFormats.strikethrough) {
+      const element = getSelectedElement();
+      if (
+        !selectedRange
+        || !element
+        || element.tagName !== 'DEL'
+        || !element.textContent
+      ) {
+        return;
+      }
+
+      element.replaceWith(element.textContent);
+      setSelectedTextFormats((selectedFormats) => ({
+        ...selectedFormats,
+        strikethrough: false,
+      }));
+
+      return;
+    }
+
+    const text = getSelectedText();
+    document.execCommand('insertHTML', false, `<del>${text}</del>`);
+    onClose();
+  });
+
+  const handleMonospaceText = useLastCallback(() => {
+    if (selectedTextFormats.monospace) {
+      const element = getSelectedElement();
+      if (
+        !selectedRange
+        || !element
+        || element.tagName !== 'CODE'
+        || !element.textContent
+      ) {
+        return;
+      }
+
+      element.replaceWith(element.textContent);
+      setSelectedTextFormats((selectedFormats) => ({
+        ...selectedFormats,
+        monospace: false,
+      }));
+
+      return;
+    }
+
+    const text = getSelectedText(true);
+    document.execCommand('insertHTML', false, `<code class="text-entity-code" dir="auto">${text}</code>`);
+    onClose();
+  });
+
+  const handleLinkUrlConfirm = useLastCallback(() => {
+    const formattedLinkUrl = (ensureProtocol(linkUrl) || '').split('%').map(encodeURI).join('%');
+
+    if (isEditingLink) {
+      const element = getSelectedElement();
+      if (!element || element.tagName !== 'A') {
+        return;
+      }
+
+      (element as HTMLAnchorElement).href = formattedLinkUrl;
+
+      onClose();
+
+      return;
+    }
+
+    const text = getSelectedText(true);
+    restoreSelection();
+    document.execCommand(
+      'insertHTML',
+      false,
+      `<a href=${formattedLinkUrl} class="text-entity-link" dir="auto">${text}</a>`,
+    );
+    onClose();
+  });
+
+  const handleKeyDown = useLastCallback((e: KeyboardEvent) => {
+    const HANDLERS_BY_KEY: Record<string, AnyToVoidFunction> = {
+      k: openLinkControl,
+      b: handleBoldText,
+      u: handleUnderlineText,
+      i: handleItalicText,
+      m: handleMonospaceText,
+      s: handleStrikethroughText,
+      p: handleSpoilerText,
+    };
+
+    const handler = HANDLERS_BY_KEY[getKeyFromEvent(e)];
+
+    if (
+      e.altKey
+      || !(e.ctrlKey || e.metaKey)
+      || !handler
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    handler();
+  });
+
+  useEffect(() => {
+    if (isOpen) {
+      document.addEventListener('keydown', handleKeyDown);
+    }
+
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, handleKeyDown]);
+
+  const lang = useOldLang();
+
+  function handleContainerKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === 'Enter' && isLinkControlOpen) {
+      handleLinkUrlConfirm();
+      e.preventDefault();
+    }
+  }
+
+  if (!shouldRender) {
+    return undefined;
+  }
+
+  const className = buildClassName(
+    'TextFormatter',
+    transitionClassNames,
+    isLinkControlOpen && 'link-control-shown',
+  );
+
+  const linkUrlConfirmClassName = buildClassName(
+    'TextFormatter-link-url-confirm',
+    Boolean(linkUrl.length) && 'shown',
+  );
+
+  const style = anchorPosition
+    ? `left: ${anchorPosition.x}px; top: ${anchorPosition.y}px;--text-formatter-left: ${anchorPosition.x}px;`
+    : '';
+
+  return (
+    <div
+      ref={containerRef}
+      className={className}
+      style={style}
+      onKeyDown={handleContainerKeyDown}
+      // Prevents focus loss when clicking on the toolbar
+      onMouseDown={stopEvent}
+    >
+      <div className="TextFormatter-buttons">
+        <Button
+          color="translucent"
+          ariaLabel="Spoiler text"
+          className={getFormatButtonClassName('spoiler')}
+          onClick={handleSpoilerText}
+        >
+          <Icon name="eye-closed" />
+        </Button>
+        <div className="TextFormatter-divider" />
+        <Button
+          color="translucent"
+          ariaLabel="Bold text"
+          className={getFormatButtonClassName('bold')}
+          onClick={handleBoldText}
+        >
+          <Icon name="bold" />
+        </Button>
+        <Button
+          color="translucent"
+          ariaLabel="Italic text"
+          className={getFormatButtonClassName('italic')}
+          onClick={handleItalicText}
+        >
+          <Icon name="italic" />
+        </Button>
+        <Button
+          color="translucent"
+          ariaLabel="Underlined text"
+          className={getFormatButtonClassName('underline')}
+          onClick={handleUnderlineText}
+        >
+          <Icon name="underlined" />
+        </Button>
+        <Button
+          color="translucent"
+          ariaLabel="Strikethrough text"
+          className={getFormatButtonClassName('strikethrough')}
+          onClick={handleStrikethroughText}
+        >
+          <Icon name="strikethrough" />
+        </Button>
+        <Button
+          color="translucent"
+          ariaLabel="Monospace text"
+          className={getFormatButtonClassName('monospace')}
+          onClick={handleMonospaceText}
+        >
+          <Icon name="monospace" />
+        </Button>
+        <div className="TextFormatter-divider" />
+        <Button color="translucent" ariaLabel={lang('TextFormat.AddLinkTitle')} onClick={openLinkControl}>
+          <Icon name="link" />
+        </Button>
+      </div>
+
+      <div className="TextFormatter-link-control">
+        <div className="TextFormatter-buttons">
+          <Button color="translucent" ariaLabel={lang('Cancel')} onClick={closeLinkControl}>
+            <Icon name="arrow-left" />
+          </Button>
+          <div className="TextFormatter-divider" />
+
+          <div
+            className={buildClassName('TextFormatter-link-url-input-wrapper', inputClassName)}
+          >
+            <input
+              ref={linkUrlInputRef}
+              className="TextFormatter-link-url-input"
+              type="text"
+              value={linkUrl}
+              placeholder="Enter URL..."
+              autoComplete="off"
+              inputMode="url"
+              dir="auto"
+              onChange={handleLinkUrlChange}
+              onScroll={updateInputStyles}
+            />
+          </div>
+
+          <div className={linkUrlConfirmClassName}>
+            <div className="TextFormatter-divider" />
+            <Button
+              color="translucent"
+              ariaLabel={lang('Save')}
+              className="color-primary"
+              onClick={handleLinkUrlConfirm}
+            >
+              <Icon name="check" />
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+const CONTEXT_MENU_CLOSE_DELAY_MS = 100;
+// Focus slows down animation, also it breaks transition layout in Chrome
+const FOCUS_DELAY_MS = 350;
+const TRANSITION_DURATION_FACTOR = 50;
+
+const SCROLLER_CLASS = 'input-scroller';
+const INPUT_WRAPPER_CLASS = 'message-input-wrapper';
+
+type MessageInputOwnProps = {
+  ref?: RefObject<HTMLTextAreaElement>;
+  id: string;
+  chatId: string;
+  threadId: ThreadId;
+  isAttachmentModalInput?: boolean;
+  isStoryInput?: boolean;
+  customEmojiPrefix: string;
+  editableInputId?: string;
+  isReady: boolean;
+  isActive: boolean;
+  getHtml: Signal<string>;
+  placeholder: string;
+  timedPlaceholderLangKey?: string;
+  timedPlaceholderDate?: number;
+  forcedPlaceholder?: string;
+  noFocusInterception?: boolean;
+  canAutoFocus: boolean;
+  shouldSuppressFocus?: boolean;
+  shouldSuppressTextFormatter?: boolean;
+  canSendPlainText?: boolean;
+  onUpdate: (html: string) => void;
+  onSuppressedFocus?: () => void;
+  onSend: () => void;
+  onScroll?: (event: React.UIEvent<HTMLElement>) => void;
+  captionLimit?: number;
+  onFocus?: NoneToVoidFunction;
+  onBlur?: NoneToVoidFunction;
+  isNeedPremium?: boolean;
+};
+
+type MessageInputStateProps = {
+  replyInfo?: ApiInputMessageReplyInfo;
+  isSelectModeActive?: boolean;
+  messageSendKeyCombo?: ISettings['messageSendKeyCombo'];
+  canPlayAnimatedEmojis: boolean;
+};
+
+const MAX_ATTACHMENT_MODAL_INPUT_HEIGHT = 160;
+const MAX_STORY_MODAL_INPUT_HEIGHT = 128;
+const TAB_INDEX_PRIORITY_TIMEOUT = 2000;
+// Heuristics allowing the user to make a triple click
+const SELECTION_RECALCULATE_DELAY_MS = 260;
+const TEXT_FORMATTER_SAFE_AREA_PX = 140;
+// For some reason Safari inserts `<br>` after user removes text from input
+const SAFARI_BR = '<br>';
+const IGNORE_KEYS = [
+  'Esc', 'Escape', 'Enter', 'PageUp', 'PageDown', 'Meta', 'Alt', 'Ctrl', 'ArrowDown', 'ArrowUp', 'Control', 'Shift',
+];
+
+function clearSelection() {
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+
+  if (selection.removeAllRanges) {
+    selection.removeAllRanges();
+  } else if (selection.empty) {
+    selection.empty();
+  }
+}
+
+const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
+  ref,
+  id,
+  chatId,
+  captionLimit,
+  isAttachmentModalInput,
+  isStoryInput,
+  customEmojiPrefix,
+  editableInputId,
+  isReady,
+  isActive,
+  getHtml,
+  placeholder,
+  timedPlaceholderLangKey,
+  timedPlaceholderDate,
+  forcedPlaceholder,
+  canSendPlainText,
+  canAutoFocus,
+  noFocusInterception,
+  shouldSuppressFocus,
+  shouldSuppressTextFormatter,
+  replyInfo,
+  isSelectModeActive,
+  canPlayAnimatedEmojis,
+  messageSendKeyCombo,
+  onUpdate,
+  onSuppressedFocus,
+  onSend,
+  onScroll,
+  onFocus,
+  onBlur,
+  isNeedPremium,
+}) => {
+  const {
+    editLastMessage,
+    replyToNextMessage,
+    showAllowedMessageTypesNotification,
+    openPremiumModal,
+  } = getActions();
+
+
+  // eslint-disable-next-line no-null/no-null
+  let inputRef = useRef<HTMLTextAreaElement>(null);
+  if (ref) {
+    inputRef = ref;
+  }
+
+  // eslint-disable-next-line no-null/no-null
+  const selectionTimeoutRef = useRef<number>(null);
+  // eslint-disable-next-line no-null/no-null
+  const cloneRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line no-null/no-null
+  const scrollerCloneRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line no-null/no-null
+  const sharedCanvasRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line no-null/no-null
+  const sharedCanvasHqRef = useRef<HTMLCanvasElement>(null);
+  // eslint-disable-next-line no-null/no-null
+  const absoluteContainerRef = useRef<HTMLDivElement>(null);
+
+  const lang = useOldLang();
+  const isContextMenuOpenRef = useRef(false);
+  const [isTextFormatterOpen, openTextFormatter, closeTextFormatter] = useFlag();
+  const [textFormatterAnchorPosition, setTextFormatterAnchorPosition] = useState<IAnchorPosition>();
+  const [selectedRange, setSelectedRange] = useState<Range>();
+  const [isTextFormatterDisabled, setIsTextFormatterDisabled] = useState<boolean>(false);
+  const { isMobile } = useAppLayout();
+  const isMobileDevice = isMobile && (IS_IOS || IS_ANDROID);
+
+  const [shouldDisplayTimer, setShouldDisplayTimer] = useState(false);
+
+  useEffect(() => {
+    setShouldDisplayTimer(Boolean(timedPlaceholderLangKey && timedPlaceholderDate));
+  }, [timedPlaceholderDate, timedPlaceholderLangKey]);
+
+  const handleTimerEnd = useLastCallback(() => {
+    setShouldDisplayTimer(false);
+  });
+
+  useInputCustomEmojis(
+    getHtml,
+    inputRef,
+    sharedCanvasRef,
+    sharedCanvasHqRef,
+    absoluteContainerRef,
+    customEmojiPrefix,
+    canPlayAnimatedEmojis,
+    isReady,
+    isActive,
+  );
+
+  const textRendererRef = useRef<HTMLDivElement>(null);
+  const maxInputHeight = isAttachmentModalInput
+    ? MAX_ATTACHMENT_MODAL_INPUT_HEIGHT
+    : isStoryInput ? MAX_STORY_MODAL_INPUT_HEIGHT : (isMobile ? 256 : 416);
+  const updateInputHeight = useCallback((willSend = false) => {
+    requestForcedReflow(() => {
+      const scroller = inputRef.current!.closest<HTMLDivElement>(`.${SCROLLER_CLASS}`)!;
+      const currentHeight = Number(scroller.style.height.replace('px', ''));
+      const { scrollHeight } =  inputRef.current!.scrollHeight;
+      const newHeight = Math.min(scrollHeight, maxInputHeight);
+
+      if (newHeight === currentHeight) {
+        return undefined;
+      }
+
+      const isOverflown = scrollHeight > maxInputHeight;
+
+      function exec() {
+        const transitionDuration = Math.round(
+          TRANSITION_DURATION_FACTOR * Math.log(Math.abs(newHeight - currentHeight)),
+        );
+        scroller.style.height = `${newHeight}px`;
+        scroller.style.transitionDuration = `${transitionDuration}ms`;
+        scroller.classList.toggle('overflown', isOverflown);
+      }
+
+      if (willSend) {
+        // Delay to next frame to sync with sending animation
+        requestMutation(exec);
+        return undefined;
+      } else {
+        return exec;
+      }
+    });
+  }, [getHtml]);
+
+  useEffect(() => {
+    if (!isAttachmentModalInput) return;
+    updateInputHeight(false);
+  }, [isAttachmentModalInput, updateInputHeight]);
+
+  const htmlRef = useRef(getHtml());
+  useLayoutEffect(() => {
+    const html = isActive ? getHtml() : '';
+    console.log(123, html !== inputRef.current!.innerHTML)
+
+    if (html !== inputRef.current!.innerHTML) {
+      inputRef.current!.innerHTML = html;
+    }
+
+    if (html !== cloneRef.current!.innerHTML) {
+      cloneRef.current!.innerHTML = html;
+    }
+
+    if (html !== htmlRef.current) {
+      htmlRef.current = html;
+
+      updateInputHeight(!html);
+    }
+  }, [getHtml, isActive, updateInputHeight]);
+
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
+  const focusInput = useLastCallback(() => {
+    if (!textareaRef.current || isNeedPremium) {
+      return;
+    }
+
+    if (getIsHeavyAnimating()) {
+      setTimeout(focusInput, FOCUS_DELAY_MS);
+      return;
+    }
+
+    focusEditableElement(textareaRef.current!);
+  });
+
+  const handleCloseTextFormatter = useLastCallback(() => {
+    closeTextFormatter();
+    clearSelection();
+  });
+
+  function checkSelection() {
+    // Disable the formatter on iOS devices for now.
+    if (IS_IOS) {
+      return false;
+    }
+
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount || isContextMenuOpenRef.current) {
+      closeTextFormatter();
+      if (IS_ANDROID) {
+        setIsTextFormatterDisabled(false);
+      }
+      return false;
+    }
+
+    const selectionRange = selection.getRangeAt(0);
+    const selectedText = selectionRange.toString().trim();
+    if (
+      shouldSuppressTextFormatter
+      || !isSelectionInsideInput(selectionRange, editableInputId || EDITABLE_INPUT_ID)
+      || !selectedText
+      || parseEmojiOnlyString(selectedText)
+      || !selectionRange.START_TO_END
+    ) {
+      closeTextFormatter();
+      return false;
+    }
+
+    return true;
+  }
+
+  function processSelection() {
+    if (!checkSelection()) {
+      return;
+    }
+
+    if (isTextFormatterDisabled) {
+      return;
+    }
+
+    const selectionRange = window.getSelection()!.getRangeAt(0);
+    const selectionRect = selectionRange.getBoundingClientRect();
+    const scrollerRect = inputRef.current!.closest<HTMLDivElement>(`.${SCROLLER_CLASS}`)!.getBoundingClientRect();
+
+    let x = (selectionRect.left + selectionRect.width / 2) - scrollerRect.left;
+
+    if (x < TEXT_FORMATTER_SAFE_AREA_PX) {
+      x = TEXT_FORMATTER_SAFE_AREA_PX;
+    } else if (x > scrollerRect.width - TEXT_FORMATTER_SAFE_AREA_PX) {
+      x = scrollerRect.width - TEXT_FORMATTER_SAFE_AREA_PX;
+    }
+
+    setTextFormatterAnchorPosition({
+      x,
+      y: selectionRect.top - scrollerRect.top,
+    });
+
+    setSelectedRange(selectionRange);
+    openTextFormatter();
+  }
+
+  function processSelectionWithTimeout() {
+    if (selectionTimeoutRef.current) {
+      window.clearTimeout(selectionTimeoutRef.current);
+    }
+    // Small delay to allow browser properly recalculate selection
+    selectionTimeoutRef.current = window.setTimeout(processSelection, SELECTION_RECALCULATE_DELAY_MS);
+  }
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.position = 'absolute';
+      textareaRef.current.style.top = '-80px';
+    }
+  }, []);
+
+  function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+    if (e.button !== 2) {
+      const listenerEl = e.currentTarget.closest(`.${INPUT_WRAPPER_CLASS}`) || e.target;
+
+      listenerEl.addEventListener('mouseup', processSelectionWithTimeout, { once: true });
+      return;
+    }
+
+    if (isContextMenuOpenRef.current) {
+      return;
+    }
+
+    isContextMenuOpenRef.current = true;
+
+    function handleCloseContextMenu(e2: KeyboardEvent | MouseEvent) {
+      if (e2 instanceof KeyboardEvent && e2.key !== 'Esc' && e2.key !== 'Escape') {
+        return;
+      }
+
+      setTimeout(() => {
+        isContextMenuOpenRef.current = false;
+      }, CONTEXT_MENU_CLOSE_DELAY_MS);
+
+      window.removeEventListener('keydown', handleCloseContextMenu);
+      window.removeEventListener('mousedown', handleCloseContextMenu);
+    }
+
+    document.addEventListener('mousedown', handleCloseContextMenu);
+    document.addEventListener('keydown', handleCloseContextMenu);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    console.log(123123)
+    // https://levelup.gitconnected.com/javascript-events-handlers-keyboard-and-load-events-1b3e46a6b0c3#1960
+    const { isComposing } = e;
+
+    const html = getHtml();
+    if (!isComposing && !html && (e.metaKey || e.ctrlKey)) {
+      const targetIndexDelta = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : undefined;
+      if (targetIndexDelta) {
+        e.preventDefault();
+
+        replyToNextMessage({ targetIndexDelta });
+        return;
+      }
+    }
+
+    if (!isComposing && e.key === 'Enter' && !e.shiftKey) {
+      if (
+        !isMobileDevice
+        && (
+          (messageSendKeyCombo === 'enter' && !e.shiftKey)
+          || (messageSendKeyCombo === 'ctrl-enter' && (e.ctrlKey || e.metaKey))
+        )
+      ) {
+        e.preventDefault();
+
+        closeTextFormatter();
+        onSend();
+      }
+    } else if (!isComposing && e.key === 'ArrowUp' && !html && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      editLastMessage();
+    } else {
+      e.target.addEventListener('keyup', processSelectionWithTimeout, { once: true });
+    }
+  }
+
+  function handleChange(e: ChangeEvent<HTMLDivElement>) {
+    const { innerHTML, textContent } = e.currentTarget;
+
+    onUpdate(innerHTML === SAFARI_BR ? '' : innerHTML);
+
+    // Reset focus on the input to remove any active styling when input is cleared
+    if (
+      !IS_TOUCH_ENV
+      && (!textContent || !textContent.length)
+      // When emojis are not supported, innerHTML contains an emoji img tag that doesn't exist in the textContext
+      && !(!IS_EMOJI_SUPPORTED && innerHTML.includes('emoji-small'))
+      && !(innerHTML.includes('custom-emoji'))
+    ) {
+      const selection = window.getSelection()!;
+      if (selection) {
+        inputRef.current!.blur();
+        selection.removeAllRanges();
+        focusEditableElement(inputRef.current!, true);
+      }
+    }
+  }
+
+  function handleAndroidContextMenu(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+    if (!checkSelection()) {
+      return;
+    }
+
+    setIsTextFormatterDisabled(!isTextFormatterDisabled);
+
+    if (!isTextFormatterDisabled) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      processSelection();
+    } else {
+      closeTextFormatter();
+    }
+  }
+
+  function handleClick() {
+    if (isAttachmentModalInput || canSendPlainText || (isStoryInput && isNeedPremium)) return;
+    showAllowedMessageTypesNotification({ chatId });
+  }
+
+  const handleOpenPremiumModal = useLastCallback(() => openPremiumModal());
+
+  useEffect(() => {
+    if (IS_TOUCH_ENV) {
+      return;
+    }
+
+    if (canAutoFocus) {
+      focusInput();
+    }
+  }, [chatId, focusInput, replyInfo, canAutoFocus]);
+
+  useEffect(() => {
+    if (
+      !chatId
+      || editableInputId !== EDITABLE_INPUT_ID
+      || noFocusInterception
+      || isMobileDevice
+      || isSelectModeActive
+    ) {
+      return undefined;
+    }
+
+    const handleDocumentKeyDown = (e: KeyboardEvent) => {
+      if (getIsDirectTextInputDisabled()) {
+        return;
+      }
+
+      const { key } = e;
+      const target = e.target as HTMLElement | undefined;
+
+      if (!target || IGNORE_KEYS.includes(key)) {
+        return;
+      }
+
+      const input = inputRef.current!;
+      const isSelectionCollapsed = document.getSelection()?.isCollapsed;
+
+      if (
+        ((key.startsWith('Arrow') || (e.shiftKey && key === 'Shift')) && !isSelectionCollapsed)
+        || (e.code === 'KeyC' && (e.ctrlKey || e.metaKey) && target.tagName !== 'INPUT')
+      ) {
+        return;
+      }
+
+      if (
+        input
+        && target !== input
+        && target.tagName !== 'INPUT'
+        && target.tagName !== 'TEXTAREA'
+        && !target.isContentEditable
+      ) {
+        focusEditableElement(input, true, true);
+
+        const newEvent = new KeyboardEvent(e.type, e as any);
+        input.dispatchEvent(newEvent);
+      }
+    };
+
+    document.addEventListener('keydown', handleDocumentKeyDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleDocumentKeyDown, true);
+    };
+  }, [chatId, editableInputId, isMobileDevice, isSelectModeActive, noFocusInterception]);
+
+  useEffect(() => {
+    const captureFirstTab = debounce((e: KeyboardEvent) => {
+      if (e.key === 'Tab' && !getIsDirectTextInputDisabled()) {
+        e.preventDefault();
+        requestMutation(focusInput);
+      }
+    }, TAB_INDEX_PRIORITY_TIMEOUT, true, false);
+
+    return captureKeyboardListeners({ onTab: captureFirstTab });
+  }, [focusInput]);
+
+  useEffect(() => {
+    const input = inputRef.current!;
+
+    function suppressFocus() {
+      input.blur();
+    }
+
+    if (shouldSuppressFocus) {
+      input.addEventListener('focus', suppressFocus);
+    }
+
+    return () => {
+      input.removeEventListener('focus', suppressFocus);
+    };
+  }, [shouldSuppressFocus]);
+
+  const isTouched = useDerivedState(() => Boolean(isActive && getHtml()), [isActive, getHtml]);
+
+  const className = buildClassName(
+    'form-control allow-selection',
+    isTouched && 'touched',
+    shouldSuppressFocus && 'focus-disabled',
+  );
+
+  const inputScrollerContentClass = buildClassName('input-scroller-content', isNeedPremium && 'is-need-premium');
+
+  return (
+    <div id={id} onClick={shouldSuppressFocus ? onSuppressedFocus : undefined} dir={lang.isRtl ? 'rtl' : undefined}>
+      <div
+        className={buildClassName('custom-scroll', SCROLLER_CLASS, isNeedPremium && 'is-need-premium')}
+        onScroll={onScroll}
+        onClick={!isAttachmentModalInput && !canSendPlainText ? handleClick : undefined}
+      >
+        <div className={inputScrollerContentClass}>
+          <TextEditor
+            inputRef={inputRef}
+            id={editableInputId || EDITABLE_INPUT_ID}
+            className={className}
+            contentEditable={isAttachmentModalInput || canSendPlainText}
+            textRendererRef={textRendererRef}
+            setText={onUpdate}
+            getText={getHtml}
+            onClick={focusInput}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleMouseDown}
+            onContextMenu={IS_ANDROID ? handleAndroidContextMenu : undefined}
+            onTouchCancel={IS_ANDROID ? processSelectionWithTimeout : undefined}
+            aria-label={placeholder}
+            onFocus={!isNeedPremium ? onFocus : undefined}
+            onBlur={!isNeedPremium ? onBlur : undefined}
+          />
+          {!forcedPlaceholder && (
+            <span
+              className={buildClassName(
+                'placeholder-text',
+                !isAttachmentModalInput && !canSendPlainText && 'with-icon',
+                isNeedPremium && 'is-need-premium',
+              )}
+              dir="auto"
+            >
+              {!isAttachmentModalInput && !canSendPlainText
+                && <Icon name="lock-badge" className="placeholder-icon" />}
+              {shouldDisplayTimer ? (
+                <TextTimer langKey={timedPlaceholderLangKey!} endsAt={timedPlaceholderDate!} onEnd={handleTimerEnd} />
+              ) : placeholder}
+              {isStoryInput && isNeedPremium && (
+                <Button className="unlock-button" size="tiny" color="adaptive" onClick={handleOpenPremiumModal}>
+                  {lang('StoryRepliesLockedButton')}
+                </Button>
+              )}
+            </span>
+          )}
+          <canvas ref={sharedCanvasRef} className="shared-canvas" />
+          <canvas ref={sharedCanvasHqRef} className="shared-canvas" />
+          <div ref={absoluteContainerRef} className="absolute-video-container" />
+        </div>
+      </div>
+      <div
+        ref={scrollerCloneRef}
+        className={buildClassName('custom-scroll',
+          SCROLLER_CLASS,
+          'clone',
+          isNeedPremium && 'is-need-premium')}
+      >
+        <div className={inputScrollerContentClass}>
+          <div ref={cloneRef} className={buildClassName(className, 'clone')} dir="auto" />
+        </div>
+      </div>
+      {captionLimit !== undefined && (
+        <div className="max-length-indicator" dir="auto">
+          {captionLimit}
+        </div>
+      )}
+      <TextFormatter
+        isOpen={isTextFormatterOpen}
+        anchorPosition={textFormatterAnchorPosition}
+        selectedRange={selectedRange}
+        setSelectedRange={setSelectedRange}
+        onClose={handleCloseTextFormatter}
+      />
+      {forcedPlaceholder && <span className="forced-placeholder">{renderText(forcedPlaceholder!)}</span>}
+    </div>
+  );
+};
+
+const LocalMessageInput = memo(withGlobal<MessageInputOwnProps>(
+  (global, { chatId, threadId }: MessageInputOwnProps): MessageInputStateProps => {
+    const { messageSendKeyCombo } = global.settings.byKey;
+
+    return {
+      messageSendKeyCombo,
+      replyInfo: chatId && threadId ? selectDraft(global, chatId, threadId)?.replyInfo : undefined,
+      isSelectModeActive: selectIsInSelectMode(global),
+      canPlayAnimatedEmojis: selectCanPlayAnimatedEmojis(global),
+    };
+  },
+)(MessageInput));
+
+const TYPE_HTML = 'text/html';
+const DOCUMENT_TYPE_WORD = 'urn:schemas-microsoft-com:office:word';
+const NAMESPACE_PREFIX_WORD = 'xmlns:w';
+
+const VALID_TARGET_IDS = new Set([EDITABLE_INPUT_ID, EDITABLE_INPUT_MODAL_ID, EDITABLE_STORY_INPUT_ID]);
+const CLOSEST_CONTENT_EDITABLE_SELECTOR = 'div[contenteditable]';
+
+const useClipboardPaste = (
+  isActive: boolean,
+  insertTextAndUpdateCursor: (text: ApiFormattedText, inputId?: string) => void,
+  setAttachments: StateHookSetter<ApiAttachment[]>,
+  setNextText: StateHookSetter<ApiFormattedText | undefined>,
+  editedMessage: ApiMessage | undefined,
+  shouldStripCustomEmoji?: boolean,
+  onCustomEmojiStripped?: VoidFunction,
+) => {
+  const { showNotification } = getActions();
+  const lang = useOldLang();
+
+  useEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+
+    async function handlePaste(e: ClipboardEvent) {
+      if (!e.clipboardData) {
+        return;
+      }
+
+      const input = (e.target as HTMLElement)?.closest(CLOSEST_CONTENT_EDITABLE_SELECTOR);
+      if (!input || !VALID_TARGET_IDS.has(input.id)) {
+        return;
+      }
+
+      e.preventDefault();
+
+      // Some extensions can trigger paste into their panels without focus
+      if (document.activeElement !== input) {
+        return;
+      }
+
+      const pastedText = e.clipboardData.getData('text');
+      const html = e.clipboardData.getData('text/html');
+
+      let pastedFormattedText = html ? parseHtmlAsFormattedText(
+        preparePastedHtml(html), undefined, true,
+      ) : undefined;
+
+      if (pastedFormattedText && containsCustomEmoji(pastedFormattedText) && shouldStripCustomEmoji) {
+        pastedFormattedText = stripCustomEmoji(pastedFormattedText);
+        onCustomEmojiStripped?.();
+      }
+
+      const { items } = e.clipboardData;
+      let files: File[] | undefined = [];
+
+      if (items.length > 0) {
+        files = await getFilesFromDataTransferItems(items);
+        if (editedMessage) {
+          files = files?.slice(0, 1);
+        }
+      }
+
+      if (!files?.length && !pastedText) {
+        return;
+      }
+
+      const textToPaste = pastedFormattedText?.entities?.length ? pastedFormattedText : { text: pastedText };
+
+      let isWordDocument = false;
+      try {
+        const parser = new DOMParser();
+        const parsedDocument = parser.parseFromString(html, TYPE_HTML);
+        isWordDocument = parsedDocument.documentElement
+          .getAttribute(NAMESPACE_PREFIX_WORD) === DOCUMENT_TYPE_WORD;
+      } catch (err: any) {
+        // Ignore
+      }
+
+      const hasText = textToPaste && textToPaste.text;
+      let shouldSetAttachments = files?.length && !isWordDocument;
+
+      const newAttachments = files ? await Promise.all(files.map((file) => buildAttachment(file.name, file))) : [];
+      const canReplace = (editedMessage && newAttachments?.length
+        && canReplaceMessageMedia(editedMessage, newAttachments[0])) || Boolean(hasText);
+      const isUploadingDocumentSticker = isUploadingFileSticker(newAttachments[0]);
+      const isInAlbum = editedMessage && editedMessage?.groupedId;
+
+      if (editedMessage && isUploadingDocumentSticker) {
+        showNotification({ message: lang(isInAlbum ? 'lng_edit_media_album_error' : 'lng_edit_media_invalid_file') });
+        return;
+      }
+
+      if (isInAlbum) {
+        shouldSetAttachments = canReplace;
+        if (!shouldSetAttachments) {
+          showNotification({ message: lang('lng_edit_media_album_error') });
+          return;
+        }
+      }
+
+      if (shouldSetAttachments) {
+        setAttachments(editedMessage ? newAttachments : (attachments) => attachments.concat(newAttachments));
+      }
+
+      if (hasText) {
+        if (shouldSetAttachments) {
+          setNextText(textToPaste);
+        } else {
+          insertTextAndUpdateCursor(textToPaste, input?.id);
+        }
+      }
+    }
+
+    document.addEventListener('paste', handlePaste, false);
+
+    return () => {
+      document.removeEventListener('paste', handlePaste, false);
+    };
+  }, [
+    insertTextAndUpdateCursor, editedMessage, setAttachments, isActive, shouldStripCustomEmoji,
+    onCustomEmojiStripped, setNextText, lang,
+  ]);
+};
 
 const Composer: FC<OwnProps & StateProps> = ({
   type,
@@ -417,17 +2781,22 @@ const Composer: FC<OwnProps & StateProps> = ({
   const lang = useOldLang();
 
   // eslint-disable-next-line no-null/no-null
-  const inputRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const textRendererRef = useRef<HTMLElement>(null);
 
   // eslint-disable-next-line no-null/no-null
   const storyReactionRef = useRef<HTMLButtonElement>(null);
 
-  const [getHtml, setHtml] = useSignal('');
+  const [getHtml, onChangeHtml] = useSignal('');
   const [isMounted, setIsMounted] = useState(false);
   const getSelectionRange = useGetSelectionRange(editableInputCssSelector);
   const lastMessageSendTimeSeconds = useRef<number>();
   const prevDropAreaState = usePreviousDeprecated(dropAreaState);
   const { width: windowWidth } = windowSize.get();
+
+  const setHtml = (value: string) => {
+    onChangeHtml(value);
+  }
 
   const isInMessageList = type === 'messageList';
   const isInStoryViewer = type === 'story';
@@ -657,7 +3026,7 @@ const Composer: FC<OwnProps & StateProps> = ({
     getHtml,
     setHtml,
     getSelectionRange,
-    inputRef,
+    inputRef as RefObject<HTMLDivElement>,
     customEmojiForEmoji,
   );
 
@@ -685,7 +3054,7 @@ const Composer: FC<OwnProps & StateProps> = ({
     getHtml,
     setHtml,
     getSelectionRange,
-    inputRef,
+    inputRef as RefObject<HTMLDivElement>,
     groupChatMembers,
     topInlineBotIds,
     currentUserId,
@@ -925,13 +3294,13 @@ const Composer: FC<OwnProps & StateProps> = ({
   });
 
   const sendAttachments = useLastCallback(({
-    attachments: attachmentsToSend,
-    sendCompressed = attachmentSettings.shouldCompress,
-    sendGrouped = attachmentSettings.shouldSendGrouped,
-    isSilent,
-    scheduledAt,
-    isInvertedMedia,
-  }: {
+                                             attachments: attachmentsToSend,
+                                             sendCompressed = attachmentSettings.shouldCompress,
+                                             sendGrouped = attachmentSettings.shouldSendGrouped,
+                                             isSilent,
+                                             scheduledAt,
+                                             isInvertedMedia,
+                                           }: {
     attachments: ApiAttachment[];
     sendCompressed?: boolean;
     sendGrouped?: boolean;
@@ -943,7 +3312,7 @@ const Composer: FC<OwnProps & StateProps> = ({
       return;
     }
 
-    const { text, entities } = parseHtmlAsFormattedText(getHtml());
+    const { text, entities } = parseAstAsFormattedText(parseMarkup(getHtml()));
     if (!text && !attachmentsToSend.length) {
       return;
     }
@@ -1033,7 +3402,8 @@ const Composer: FC<OwnProps & StateProps> = ({
       }
     }
 
-    const { text, entities } = parseHtmlAsFormattedText(getHtml());
+    const { text, entities } = parseAstAsFormattedText(parseMarkup(getHtml()));
+    console.log({ text, entities })
 
     if (currentAttachments.length) {
       sendAttachments({
@@ -1414,7 +3784,7 @@ const Composer: FC<OwnProps & StateProps> = ({
   const isComposerHasFocus = isBotKeyboardOpen || isSymbolMenuOpen || isEmojiTooltipOpen || isSendAsMenuOpen
     || isMentionTooltipOpen || isInlineBotTooltipOpen || isBotCommandMenuOpen || isAttachMenuOpen
     || isStickerTooltipOpen || isChatCommandTooltipOpen || isCustomEmojiTooltipOpen || isBotMenuButtonOpen
-  || isCustomSendMenuOpen || Boolean(activeVoiceRecording) || attachments.length > 0 || isInputHasFocus;
+    || isCustomSendMenuOpen || Boolean(activeVoiceRecording) || attachments.length > 0 || isInputHasFocus;
   const isReactionSelectorOpen = isComposerHasFocus && !isReactionPickerOpen && isInStoryViewer && !isAttachMenuOpen
     && !isSymbolMenuOpen;
   const placeholderForForumAsMessages = chat?.isForum && chat?.isForumAsMessages && threadId === MAIN_THREAD_ID
@@ -1826,7 +4196,7 @@ const Composer: FC<OwnProps & StateProps> = ({
               forceDarkTheme={isInStoryViewer}
             />
           )}
-          <MessageInput
+          <LocalMessageInput
             ref={inputRef}
             id={inputId}
             editableInputId={editableInputId}
@@ -2140,7 +4510,7 @@ export default memo(withGlobal<OwnProps>(
     const noWebPage = selectNoWebPage(global, chatId, threadId);
 
     const areEffectsSupported = isChatWithUser && !isChatWithBot
-    && !isInScheduledList && !isChatWithSelf && type !== 'story' && chatId !== SERVICE_NOTIFICATIONS_USER_ID;
+      && !isInScheduledList && !isChatWithSelf && type !== 'story' && chatId !== SERVICE_NOTIFICATIONS_USER_ID;
     const canPlayEffect = selectPerformanceSettingsValue(global, 'stickerEffects');
     const shouldPlayEffect = tabState.shouldPlayEffectInComposer;
     const effectId = areEffectsSupported && draft?.effectId;
