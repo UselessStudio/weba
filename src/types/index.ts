@@ -202,6 +202,7 @@ export enum SettingsScreens {
   PrivacyBlockedUsers,
   Performance,
   Folders,
+  FoldersFromChatList,
   FoldersCreateFolder,
   FoldersEditFolder,
   FoldersEditFolderFromChatList,

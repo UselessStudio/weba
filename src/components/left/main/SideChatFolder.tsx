@@ -184,12 +184,12 @@ const SideChatFolder: FC<OwnProps> = ({
       onContextMenu={handleContextMenu}
       style={style}
     >
+      {iconElement}
       {!!badgeCount && (
         <span className={buildClassName('badge', (active || badgeActive) && 'active')}>
           {badgeCount}
         </span>
       )}
-      {iconElement}
       <span className="title">{strippedTitle}</span>
       {contextActions && contextMenuAnchor !== undefined && (
         <Menu

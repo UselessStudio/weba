@@ -69,6 +69,7 @@ const PASSCODE_SCREENS = [
 
 const FOLDERS_SCREENS = [
   SettingsScreens.Folders,
+  SettingsScreens.FoldersFromChatList,
   SettingsScreens.FoldersCreateFolder,
   SettingsScreens.FoldersEditFolder,
   SettingsScreens.FoldersEditFolderFromChatList,
@@ -402,6 +403,7 @@ const Settings: FC<OwnProps> = ({
         );
 
       case SettingsScreens.Folders:
+      case SettingsScreens.FoldersFromChatList:
       case SettingsScreens.FoldersCreateFolder:
       case SettingsScreens.FoldersEditFolder:
       case SettingsScreens.FoldersEditFolderFromChatList:

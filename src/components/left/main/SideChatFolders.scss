@@ -2,7 +2,7 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
 
 
 #LeftColumn-folders {
-  --left-column-folders-height: 4.5rem;
+  --left-column-folders-height: 4.7rem;
 
   & {
     display: flex;
@@ -30,6 +30,7 @@ $icons: "bot", "channel", "chat", "chats", "folder", "group", "star", "user";
       text-overflow: ellipsis;
       overflow: hidden;
       width: 4rem;
+      margin-top: 0.2rem;
     }
 
     .badge {

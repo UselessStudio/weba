@@ -327,6 +327,7 @@ function LeftColumn({
           setSettingsScreen(SettingsScreens.FoldersEditFolderFromChatList);
           return;
 
+        case SettingsScreens.FoldersFromChatList:
         case SettingsScreens.FoldersEditFolderFromChatList:
         case SettingsScreens.FoldersEditFolderInvites:
           setContent(LeftColumnContent.ChatList);

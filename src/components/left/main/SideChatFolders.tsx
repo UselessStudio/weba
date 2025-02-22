@@ -6,6 +6,7 @@ import React, {
 import { getActions, getGlobal, withGlobal } from '../../../global';
 
 import type { ApiChatFolder, ApiChatlistExportedInvite } from '../../../api/types';
+import { SettingsScreens } from '../../../types';
 
 import { ALL_FOLDER_ID } from '../../../config';
 import { selectCanShareFolder, selectIsCurrentUserPremium, selectTabState } from '../../../global/selectors';
@@ -19,6 +20,8 @@ import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
 import usePreviousDeprecated from '../../../hooks/usePreviousDeprecated';
 
+import Icon from '../../common/icons/Icon';
+import Button from '../../ui/Button';
 import { type MenuItemContextAction } from '../../ui/ListItem';
 import MainMenuDropdown from './MainMenuDropdown';
 import SideChatFolder from './SideChatFolder';
@@ -63,6 +66,7 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
     openDeleteChatFolderModal,
     openEditChatFolder,
     openLimitReachedModal,
+    requestNextSettingsScreen,
     sortChatFolders,
   } = getActions();
   const { isMobile } = useAppLayout();
@@ -204,6 +208,10 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
     sortChatFolders({ folderIds: state.dragOrderIds! });
   }, [state.dragOrderIds]);
 
+  const onSettingsClick = useCallback(() => {
+    requestNextSettingsScreen({ screen: SettingsScreens.FoldersFromChatList });
+  }, []);
+
   return (
     <div id="LeftColumn-folders">
       <MainMenuDropdown
@@ -240,6 +248,19 @@ const SideChatFolders: FC<OwnProps & StateProps> = ({
             />
           );
         })}
+
+        <Button
+          className="chat-folder"
+          isRectangular
+          color="translucent"
+          onClick={onSettingsClick}
+          ripple
+          noForcedUpperCase
+          style={`top: calc(var(--left-column-folders-height) * ${chatFolders.length})`}
+        >
+          <Icon name="settings-filled" className="icons-chat-folder" />
+          <span className="title">{lang('Edit')}</span>
+        </Button>
       </div>
 
     </div>

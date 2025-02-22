@@ -154,6 +154,7 @@ const SettingsFolders: FC<OwnProps> = ({
 
   switch (currentScreen) {
     case SettingsScreens.Folders:
+    case SettingsScreens.FoldersFromChatList:
       return (
         <SettingsFoldersMain
           onCreateFolder={handleCreateFolder}

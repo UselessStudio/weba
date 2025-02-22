@@ -17,12 +17,13 @@ type OwnProps = {
   setIconFolder: (icon: string) => void;
   setIconEmoji: (emoji: string) => void;
   setIconSticker: (sticker: ApiSticker) => void;
+  noTitleAnimations?: boolean;
   emoticon?: string;
   title: ApiFormattedText;
 };
 
 const FolderIconButton: FC<OwnProps> = ({
-  setIconEmoji, setIconFolder, setIconSticker, title, emoticon,
+  setIconEmoji, setIconFolder, setIconSticker, title, emoticon, noTitleAnimations,
 }) => {
   // eslint-disable-next-line no-null/no-null
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -61,7 +62,7 @@ const FolderIconButton: FC<OwnProps> = ({
         className="emoji-status"
         onClick={handleEmojiStatusClick}
       >
-        <FolderIcon title={title} emoticon={emoticon} />
+        <FolderIcon noTitleAnimations={noTitleAnimations} title={title} emoticon={emoticon} />
       </Button>
       <FolderIconPickerMenu
         buttonRef={buttonRef}

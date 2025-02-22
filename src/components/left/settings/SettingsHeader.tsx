@@ -217,6 +217,7 @@ const SettingsHeader: FC<OwnProps> = ({
         return <h3>{oldLang('PasscodeController.ReEnterPasscode.Placeholder')}</h3>;
 
       case SettingsScreens.Folders:
+      case SettingsScreens.FoldersFromChatList:
         return <h3>{oldLang('Filters')}</h3>;
       case SettingsScreens.FoldersCreateFolder:
         return <h3>{oldLang('FilterNew')}</h3>;

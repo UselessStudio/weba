@@ -360,6 +360,7 @@ const SettingsFoldersEdit: FC<OwnProps & StateProps> = ({
               <FolderIconButton
                 title={state.folder.title}
                 emoticon={state.folder.emoticon}
+                noTitleAnimations={state.folder.noTitleAnimations}
                 setIconFolder={handleIconFolder}
                 setIconEmoji={handleIconEmoji}
                 setIconSticker={handleIconSticker}
