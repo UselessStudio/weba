@@ -166,7 +166,6 @@ import useSendMessageAction from '../../hooks/useSendMessageAction';
 import useShowTransitionDeprecated from '../../hooks/useShowTransitionDeprecated';
 import { useStateRef } from '../../hooks/useStateRef';
 import useSyncEffect from '../../hooks/useSyncEffect';
-import useLayoutEffectWithPrevDeps from '../../hooks/useSyncEffectWithPrevDeps';
 import useVirtualBackdrop from '../../hooks/useVirtualBackdrop';
 import useBackgroundMode from '../../hooks/window/useBackgroundMode';
 import useBeforeUnload from '../../hooks/window/useBeforeUnload';
@@ -445,7 +444,6 @@ function astToMarkup(ast: ASTNode): string {
 
       case ApiMessageEntityTypes.Code: {
         const content = node.value || '';
-        // Не оборачиваем в маркеры, если контент пустой или содержит перенос строки
         if (!content || content.includes('\n')) {
           return content;
         }
@@ -470,7 +468,6 @@ function astToMarkup(ast: ASTNode): string {
       case ApiMessageEntityTypes.Underline:
       case ApiMessageEntityTypes.Spoiler: {
         const content = node.children?.map(processNode).join('') || '';
-        // Не оборачиваем в маркеры, если контент пустой или состоит только из пробелов
         if (!content || !content.trim()) {
           return content;
         }
@@ -525,7 +522,6 @@ function parseFormattedTextAsAst(formattedText: ApiFormattedText): ASTNode {
   }
 
   while (currentPosition < text.length) {
-    // Находим все entities, которые начинаются в текущей позиции
     // eslint-disable-next-line @typescript-eslint/no-loop-func
     const currentEntities = sortedEntities.filter((e) => e.offset === currentPosition);
 
@@ -585,7 +581,6 @@ function parseFormattedTextAsAst(formattedText: ApiFormattedText): ASTNode {
         case ApiMessageEntityTypes.Underline:
         case ApiMessageEntityTypes.Spoiler:
         case ApiMessageEntityTypes.Blockquote: {
-          // Для этих типов нужно рекурсивно обработать содержимое
           const innerFormattedText: ApiFormattedText = {
             text: content,
             entities: sortedEntities
@@ -878,7 +873,6 @@ function tokenize(input: string, isNested: boolean = false): Token[] {
 
     const content = input.slice(pos + 1, endPos);
 
-    // Don't parse if empty or contains newline
     if (content.length === 0 || content.includes('\n')) {
       return undefined;
     }
@@ -1149,7 +1143,6 @@ function renderAst(node: ASTNode, selection: Selection): string {
     result.push(`<${tag} ${blockAttrs}>`);
 
     if (content) {
-      // For Pre blocks - render content directly
       const lines = content.split('\n');
       lines.forEach((line, index) => {
         currentLine = processTextNode(line, currentPosition);
@@ -1440,20 +1433,17 @@ const TextEditor: React.FC<TextEditorProps> = ({
       return;
     }
 
-    // Если клик точно на пустое место в линии (не на span)
     if (e.target.classList.contains('editor-line')) {
       const clickedLine = e.target as HTMLElement;
       const spans = Array.from(clickedLine.querySelectorAll('span[data-offset]'))
         .filter((span) => !span.classList.contains('newline-end') && !span.classList.contains('newline-start'));
 
       if (spans.length > 0) {
-        // Если есть символы, ставим каретку после последнего
         const lastSpan = spans[spans.length - 1];
         const position = Number(lastSpan.getAttribute('data-offset')!) + 1;
         textareaRef.current!.selectionStart = position;
         textareaRef.current!.selectionEnd = position;
       } else {
-        // Если линия пустая, находим её позицию
         const lines = Array.from(contentRef.current!.querySelectorAll('.editor-line'));
         const currentLineIndex = lines.indexOf(clickedLine);
         let position = 0;
@@ -1480,7 +1470,6 @@ const TextEditor: React.FC<TextEditorProps> = ({
       return;
     }
 
-    // Для всех остальных случаев используем нативное поведение
     const range = document.caretRangeFromPoint?.(e.clientX, e.clientY);
     if (range && textareaRef.current) {
       const position = getPositionFromRange(range);
@@ -1702,7 +1691,6 @@ const useDraft = ({
 
   // Restore draft on chat change
   useEffectWithPrevDeps(([prevChatId, prevThreadId, prevDraft]) => {
-    console.log(isDisabled, isTouchedRef.current);
     if (isDisabled) {
       return;
     }
@@ -1711,7 +1699,6 @@ const useDraft = ({
     if (chatId === prevChatId && threadId === prevThreadId) {
       if (isTouched && !draft) return; // Prevent reset from other client if we have local edits
       if (!draft && prevDraft) {
-        console.log('here213');
         setHtml('');
       }
 
@@ -1721,8 +1708,6 @@ const useDraft = ({
     if (editedMessage || !draft) {
       return;
     }
-
-    console.log(astToMarkup(parseFormattedTextAsAst(draft?.text!)));
 
     setHtml(astToMarkup(parseFormattedTextAsAst(draft?.text!)));
 
