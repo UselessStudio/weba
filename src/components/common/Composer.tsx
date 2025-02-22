@@ -2218,36 +2218,36 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     }
   }, []);
 
-  function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-    if (e.button !== 2) {
-      const listenerEl = e.currentTarget.closest(`.${INPUT_WRAPPER_CLASS}`) || e.target;
-
-      listenerEl.addEventListener('mouseup', processSelectionWithTimeout, { once: true });
-      return;
-    }
-
-    if (isContextMenuOpenRef.current) {
-      return;
-    }
-
-    isContextMenuOpenRef.current = true;
-
-    function handleCloseContextMenu(e2: KeyboardEvent | MouseEvent) {
-      if (e2 instanceof KeyboardEvent && e2.key !== 'Esc' && e2.key !== 'Escape') {
-        return;
-      }
-
-      setTimeout(() => {
-        isContextMenuOpenRef.current = false;
-      }, CONTEXT_MENU_CLOSE_DELAY_MS);
-
-      window.removeEventListener('keydown', handleCloseContextMenu);
-      window.removeEventListener('mousedown', handleCloseContextMenu);
-    }
-
-    document.addEventListener('mousedown', handleCloseContextMenu);
-    document.addEventListener('keydown', handleCloseContextMenu);
-  }
+  // function handleMouseDown(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+  //   if (e.button !== 2) {
+  //     const listenerEl = e.currentTarget.closest(`.${INPUT_WRAPPER_CLASS}`) || e.target;
+  //
+  //     listenerEl.addEventListener('mouseup', processSelectionWithTimeout, { once: true });
+  //     return;
+  //   }
+  //
+  //   if (isContextMenuOpenRef.current) {
+  //     return;
+  //   }
+  //
+  //   isContextMenuOpenRef.current = true;
+  //
+  //   function handleCloseContextMenu(e2: KeyboardEvent | MouseEvent) {
+  //     if (e2 instanceof KeyboardEvent && e2.key !== 'Esc' && e2.key !== 'Escape') {
+  //       return;
+  //     }
+  //
+  //     setTimeout(() => {
+  //       isContextMenuOpenRef.current = false;
+  //     }, CONTEXT_MENU_CLOSE_DELAY_MS);
+  //
+  //     window.removeEventListener('keydown', handleCloseContextMenu);
+  //     window.removeEventListener('mousedown', handleCloseContextMenu);
+  //   }
+  //
+  //   document.addEventListener('mousedown', handleCloseContextMenu);
+  //   document.addEventListener('keydown', handleCloseContextMenu);
+  // }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     // https://levelup.gitconnected.com/javascript-events-handlers-keyboard-and-load-events-1b3e46a6b0c3#1960
@@ -2285,44 +2285,44 @@ const MessageInput: FC<MessageInputOwnProps & MessageInputStateProps> = ({
     }
   }
 
-  function handleChange(e: React.ChangeEvent<HTMLDivElement>) {
-    const { innerHTML, textContent } = e.currentTarget;
-
-    onUpdate(innerHTML === SAFARI_BR ? '' : innerHTML);
-
-    // Reset focus on the input to remove any active styling when input is cleared
-    if (
-      !IS_TOUCH_ENV
-      && (!textContent || !textContent.length)
-      // When emojis are not supported, innerHTML contains an emoji img tag that doesn't exist in the textContext
-      && !(!IS_EMOJI_SUPPORTED && innerHTML.includes('emoji-small'))
-      && !(innerHTML.includes('custom-emoji'))
-    ) {
-      const selection = window.getSelection()!;
-      if (selection) {
-        inputRef.current!.blur();
-        selection.removeAllRanges();
-        focusEditableElement(inputRef.current!, true);
-      }
-    }
-  }
-
-  function handleAndroidContextMenu(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
-    if (!checkSelection()) {
-      return;
-    }
-
-    setIsTextFormatterDisabled(!isTextFormatterDisabled);
-
-    if (!isTextFormatterDisabled) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      processSelection();
-    } else {
-      closeTextFormatter();
-    }
-  }
+  // function handleChange(e: React.ChangeEvent<HTMLDivElement>) {
+  //   const { innerHTML, textContent } = e.currentTarget;
+  //
+  //   onUpdate(innerHTML === SAFARI_BR ? '' : innerHTML);
+  //
+  //   // Reset focus on the input to remove any active styling when input is cleared
+  //   if (
+  //     !IS_TOUCH_ENV
+  //     && (!textContent || !textContent.length)
+  //     // When emojis are not supported, innerHTML contains an emoji img tag that doesn't exist in the textContext
+  //     && !(!IS_EMOJI_SUPPORTED && innerHTML.includes('emoji-small'))
+  //     && !(innerHTML.includes('custom-emoji'))
+  //   ) {
+  //     const selection = window.getSelection()!;
+  //     if (selection) {
+  //       inputRef.current!.blur();
+  //       selection.removeAllRanges();
+  //       focusEditableElement(inputRef.current!, true);
+  //     }
+  //   }
+  // }
+  //
+  // function handleAndroidContextMenu(e: React.MouseEvent<HTMLDivElement, MouseEvent>) {
+  //   if (!checkSelection()) {
+  //     return;
+  //   }
+  //
+  //   setIsTextFormatterDisabled(!isTextFormatterDisabled);
+  //
+  //   if (!isTextFormatterDisabled) {
+  //     e.preventDefault();
+  //     e.stopPropagation();
+  //
+  //     processSelection();
+  //   } else {
+  //     closeTextFormatter();
+  //   }
+  // }
 
   function handleClick() {
     if (isAttachmentModalInput || canSendPlainText || (isStoryInput && isNeedPremium)) return;
