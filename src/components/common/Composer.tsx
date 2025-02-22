@@ -179,7 +179,7 @@ import Icon from './icons/Icon';
 import ReactionAnimatedEmoji from './reactions/ReactionAnimatedEmoji';
 
 import './Composer.scss';
-import type {ChangeEvent, RefObject} from "react";
+import type {ChangeEvent, EventHandler, RefObject} from "react";
 import type {Signal} from "../../util/signals";
 
 type ComposerType = 'messageList' | 'story';
@@ -302,6 +302,13 @@ const SELECT_MODE_TRANSITION_MS = 200;
 const SENDING_ANIMATION_DURATION = 350;
 const MOUNT_ANIMATION_DURATION = 430;
 
+interface NodeEntry {
+  type: ApiMessageEntityTypes;
+  symbols: string;
+  hasChildren: boolean;
+  isBlock?: boolean;
+}
+
 interface Token {
   type: ApiMessageEntityTypes | 'text';
   value?: string;
@@ -375,6 +382,11 @@ interface CaretCoordinates {
   top: number;
 }
 
+interface NodeEntry {
+  type: string;
+  symbols: string;
+  hasChildren: boolean;
+}
 
 interface ASTNode {
   type: string;
@@ -392,7 +404,7 @@ interface Marker {
 }
 
 interface Token {
-  type: ApiMessageEntityTypes | "text";
+  type: string;
   value?: string;
   symbol?: string;
   text?: string;
@@ -400,22 +412,33 @@ interface Token {
   children?: Token[];
 }
 
-interface ApiFormattedText {
-  text: string;
-  entities?: ApiMessageEntity[];
-}
-
-interface ApiMessageEntity {
-  type: ApiMessageEntityTypes;
-  offset: number;
-  length: number;
-  url?: string;
-  userId?: string;
-  language?: string;
-  documentId?: string;
-}
-
 function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
+  // Сначала обрабатываем AST, удаляя лишние пробелы
+  function trimAst(node: ASTNode): ASTNode {
+    if (node.type === 'text') {
+      return {
+        ...node,
+        value: node.value?.trim()
+      };
+    }
+
+    if (node.children) {
+      // Фильтруем пустые текстовые узлы и применяем trim к остальным
+      const trimmedChildren = node.children
+        .map(trimAst)
+        .filter(child => child.type !== 'text' || (child.value && child.value.trim()));
+
+      return {
+        ...node,
+        children: trimmedChildren
+      };
+    }
+
+    return node;
+  }
+
+  const trimmedAst = trimAst(ast);
+
   let text = '';
   const entities: ApiMessageEntity[] = [];
 
@@ -465,10 +488,8 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
 
       case ApiMessageEntityTypes.Code: {
         const value = node.value || '';
-        if (!value || !value.trim()) {
-          text += value;
-        } else {
-          text += value;
+        text += value;
+        if (value) {
           entities.push({
             type: node.type,
             offset: startPosition,
@@ -524,48 +545,17 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
       case ApiMessageEntityTypes.Strike:
       case ApiMessageEntityTypes.Underline:
       case ApiMessageEntityTypes.Spoiler: {
-        // Собираем весь текст внутри форматирования
-        let formattedText = '';
-        const collectInnerText = (n: ASTNode) => {
-          if (n.type === 'text') {
-            formattedText += n.value || '';
-          }
-          n.children?.forEach(collectInnerText);
-        };
-        node.children?.forEach(collectInnerText);
-
-        if (!formattedText || !formattedText.trim()) {
-          text += formattedText;
-        } else {
-          // Определяем, является ли элемент первым или последним
-          const isFirst = text.length === 0;
-          const isLast = !ast.children?.slice(startPosition + 1).some(n => n.type !== 'text' || (n.value && n.value.trim()));
-
-          // Обрабатываем пробелы в зависимости от позиции
-          const leftTrimmed = isFirst ? formattedText.trimStart() : formattedText;
-          const rightTrimmed = isLast ? leftTrimmed.trimEnd() : leftTrimmed;
-
-          const startTrim = formattedText.length - leftTrimmed.length;
-          const endTrim = leftTrimmed.length - rightTrimmed.length;
-
-          // Добавляем обрезанные пробелы как обычный текст
-          text += formattedText.slice(0, startTrim);
-
-          const entityStart = text.length;
-          text += rightTrimmed;
-
-          if (rightTrimmed) {
-            entities.push({
-              type: node.type,
-              offset: entityStart,
-              length: rightTrimmed.length
-            });
-          }
-
-          // Добавляем пробелы в конце как обычный текст
-          if (endTrim > 0) {
-            text += formattedText.slice(formattedText.length - endTrim);
-          }
+        const formatStart = text.length;
+        node.children?.forEach(child => {
+          processNode(child);
+        });
+        const length = text.length - formatStart;
+        if (length > 0) {
+          entities.push({
+            type: node.type,
+            offset: formatStart,
+            length
+          });
         }
         break;
       }
@@ -574,7 +564,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
     return startPosition;
   }
 
-  processNode(ast);
+  processNode(trimmedAst);
 
   // Sort entities by offset and handle nested entities
   entities.sort((a, b) => {
@@ -585,7 +575,7 @@ function parseAstAsFormattedText(ast: ASTNode): ApiFormattedText {
   });
 
   return {
-    text: text.trim(),
+    text,
     entities: entities.length > 0 ? entities : undefined
   };
 }
